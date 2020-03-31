@@ -1,0 +1,6 @@
+[submodule "dep/glm-c"]
+	path = deps/glm-c
+	url = https://github.com/saidwho12/glm-c
+[submodule "deps/Nuklear"]
+	path = deps/Nuklear
+	url = https://github.com/Immediate-Mode-UI/Nuklear.git

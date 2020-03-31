@@ -1,14 +1,34 @@
+#define NK_INCLUDE_STANDARD_IO
+#define NK_INCLUDE_DEFAULT_ALLOCATOR
+#define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
+#define NK_INCLUDE_FONT_BAKING
+#define NK_INCLUDE_DEFAULT_FONT
+#define NK_IMPLEMENTATION
+#define NK_KEYSTATE_BASED_INPUT
+#define NK_IMPLEMENTATION
+#include "nuklear.h"
+
+
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
+
+
+#define NK_GLFW_GL3_IMPLEMENTATION
+#include "nuklear_glfw_gl3.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 
-#include <pcap.h>
-//#include <Winsock>
 #include <Winsock2.h>
+#include <Windows.h>
 #include <pthread.h>
+#include <pcap.h>
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
+
+#include <glm/glm.h>
 
 /* 4 bytes IP address */
 typedef struct ip_address{
@@ -20,7 +40,7 @@ typedef struct ip_address{
 
 typedef struct
 {
-	ip_address dev_ip_raw;
+	ip_address dev_ip;
 } config_t;
 
 /* IPv4 header */
@@ -46,6 +66,14 @@ typedef struct udp_header{
 	u_short crc;			// Checksum
 }udp_header;
 
+typedef struct packet
+{
+	uint64_t time;
+	uint8_t *data;
+	size_t len;
+	unsigned char ip1[16];
+	unsigned char ip2[16];
+} packet_t;
 
 /* Callback function invoked by libpcap for every incoming packet */
 void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data)
@@ -100,41 +128,64 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 	
 }
 
-int main(int argc, char *argv[])
+typedef enum
 {
+	CONNECTION_STATUS_SUCCEEDED,
+	CONNECTION_STATUS_COULD_NOT_FIND_DEVICE
+} connect_status_t;
+
+typedef struct sniffer
+{
+	pcap_t *handle;
+	pthread_t thread;
+	bool is_sniffing;
+	bool is_thread_running;
+} sniffer_t;
+
+void *start_sniffing_cock_thread(void *arg)
+{
+	pcap_t *devhdl = (pcap_t *)arg;
+	pcap_loop(devhdl, 0, packet_handler, NULL);
+}
+
+void zero_default_sniffer(sniffer_t *sniffer)
+{
+	sniffer->is_thread_running = false;
+	sniffer->handle = NULL;
+	sniffer->is_sniffing = false;
+}
+
+void kill_cock_sniffer(sniffer_t *sniffer)
+{
+	if (sniffer->handle != NULL) pcap_close(sniffer->handle);
+	if (sniffer->is_thread_running) pthread_kill(sniffer->thread, 0);
+	sniffer->is_sniffing = false;
+
+	zero_default_sniffer(sniffer);
+	//memset(sniffer, 0, sizeof(sniffer_t));
+}
+
+connect_status_t sniff_cock(sniffer_t *sniffer, config_t *config)
+{
+	connect_status_t status;
 	int err;
 	char errbuf[PCAP_ERRBUF_SIZE];
-	
-	const char *pcap_version = pcap_lib_version();
-    printf("Npcap version: %s\n", pcap_version);
+
+	if (sniffer->is_sniffing)
+		kill_cock_sniffer(sniffer);
+
 
 	pcap_if_t *alldevs;
-	config_t conf;
-	conf.dev_ip_raw = (ip_address){ 192, 168, 137, 2 };
-	pcap_t *devhdl;
-    
-    //config_t conf;
-
-	//netdev = pcap_lookupdev(errbuf);
-
-	//if (netdev == NULL)
-	//{
-	//	printf("Error finding device: %s\n", errbuf);
-	//	return 1;
-	//}
-
-	/* Get device info */
 
 	err = pcap_findalldevs(&alldevs, errbuf);
 	if (err == -1)
 	{
 		fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
-		return(2);
+		return 2;
 	}
 	
+	bool found_dev = false;
 	pcap_if_t *dev = &alldevs[0];
-	pcap_if_t *src_dev;
-	pcap_if_t *dst_dev;
 	
 	while (dev != NULL)
 	{
@@ -159,10 +210,11 @@ int main(int argc, char *argv[])
 
 				printf("ip: %s\n", ip);
 
-				if (memcmp((void *)&conf.dev_ip_raw, (void *)ip_raw, sizeof(ip_address)))
+				if (!memcmp((void *)&config->dev_ip, (void *)ip_raw, sizeof(ip_address)))
 				{
-					printf("Found source device with ip %s!\n", ip);
-					src_dev= dev;
+					printf("Found device with ip %s!\n", ip);
+					found_dev = true;
+					goto im_so_happy;
 				}
 			}
 
@@ -176,32 +228,239 @@ int main(int argc, char *argv[])
 		dev = dev->next;
 	}
 
-	/* Open the device */
-	if ( (devhdl = pcap_open(src_dev->name, // name of the device
+im_so_happy:
+
+	if (!found_dev)
+	{
+		printf("Couldn't find device!\n");
+		status = CONNECTION_STATUS_COULD_NOT_FIND_DEVICE;
+		goto smells_nasty;
+	}
+
+	sniffer->handle = pcap_open(dev->name, // name of the device
 				65536, // portion of the packet to capture
 					 // 65536 guarantees that the whole packet will be captured on all the link layers
 				PCAP_OPENFLAG_PROMISCUOUS, // promiscuous mode
 				1000, // read timeout
 				NULL, // authentication on the remote machine
 				errbuf // error buffer
-				) ) == NULL)
+				);
+
+
+	/* Open the device */
+	if (sniffer->handle == NULL)
 	{
-		printf("Unable to open the adapter. %s is not supported by Npcap!\n", src_dev->name);
+		printf("Unable to open the adapter. %s is not supported by Npcap!\n", dev->name);
 		return 1;
 	}
-	
-	printf("Listening on %s...\n", src_dev->description);
+
+	printf("Listening on %s...\n", dev->description);
 
 	/* At this point, we don't need any more the device list. Free it */
-	pcap_freealldevs(alldevs);
 
 	const char *filter = "ip and udp";
 	struct bpf_program prog;
-	err = pcap_compile(devhdl, &prog, filter, true, PCAP_NETMASK_UNKNOWN);
+	err = pcap_compile(sniffer->handle, &prog, filter, true, PCAP_NETMASK_UNKNOWN);
+	err = pcap_setfilter(sniffer->handle, &prog);
 
-	err = pcap_setfilter(devhdl, &prog);
+	pthread_attr_t attrib;
+	pthread_attr_init(&attrib);
 
-	pcap_loop(devhdl, 0, packet_handler, NULL);
+	int thread_err = pthread_create(&sniffer->thread, &attrib,
+		&start_sniffing_cock_thread, (void *)sniffer->handle);
+
+	if (thread_err != 0)
+	{
+		printf("%s\n", "Failed to create thread!\n");
+		goto smells_nasty;
+	}
+
+	// Success
+	sniffer->is_thread_running = true;
+	status = CONNECTION_STATUS_SUCCEEDED;
+	sniffer->is_sniffing = true;
+
+	printf("%s\n", "Successfully created sniffer thread!\n");
+
+
+	pthread_attr_destroy(&attrib);
+
+smells_nasty:
+	pcap_freealldevs(alldevs);
+	
+	return status;
+}
+
+
+int main(int argc, char *argv[])
+{
+	int err;
+	config_t config;
+	sniffer_t sniffer;
+
+	zero_default_sniffer(&sniffer);
+
+
+	const char *pcap_version = pcap_lib_version();
+	printf("Npcap version: %s\n", pcap_version);
+	/* init gui state */
+	// struct nk_context ctx;
+	// nk_init_fixed(&ctx, calloc(1, MAX_MEMORY), MAX_MEMORY, &font);
+
+
+	unsigned int width = 1280, height = 720;
+
+	glfwInit();
+
+	
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	//glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+
+	GLFWwindow *win = glfwCreateWindow(width, height, "Escape From Tarkov Boy Radar", NULL, NULL);
+
+
+	if (win == NULL)
+	{
+		// Some kind of error creating the window
+		printf("Error creating window!\n");
+		return 1;
+	}
+
+	printf("Created a window!\n");
+
+	glfwMakeContextCurrent(win);
+
+	err = gladLoadGL();
+	if (err == 0)
+	{
+		printf("Error failed to load OpenGL!\n");
+		return 1;
+	}
+
+	printf("Loaded OpenGL properly!\n");
+
+	printf("OpenGL Version String: %s\n", glGetString(GL_VERSION));
+
+	glViewport(0, 0, width, height);
+
+
+	bool isQuit = false;
+
+	struct nk_context *ctx = nk_glfw3_init(win, NK_GLFW3_INSTALL_CALLBACKS);
+	{
+		struct nk_font_atlas *atlas;
+		nk_glfw3_font_stash_begin(&atlas);
+		/*struct nk_font *droid = nk_font_atlas_add_from_file(atlas, "../../../extra_font/DroidSans.ttf", 14, 0);*/
+		/*struct nk_font *roboto = nk_font_atlas_add_from_file(atlas, "../../../extra_font/Roboto-Regular.ttf", 14, 0);*/
+		/*struct nk_font *future = nk_font_atlas_add_from_file(atlas, "../../../extra_font/kenvector_future_thin.ttf", 13, 0);*/
+		/*struct nk_font *clean = nk_font_atlas_add_from_file(atlas, "../../../extra_font/ProggyClean.ttf", 12, 0);*/
+		/*struct nk_font *tiny = nk_font_atlas_add_from_file(atlas, "../../../extra_font/ProggyTiny.ttf", 10, 0);*/
+		/*struct nk_font *cousine = nk_font_atlas_add_from_file(atlas, "../../../extra_font/Cousine-Regular.ttf", 13, 0);*/
+		struct nk_font *font = nk_font_atlas_add_from_file(atlas, "../data/fonts/AnonymousPro-Regular.ttf", 13, NULL);
+
+		nk_glfw3_font_stash_end();
+		nk_style_load_all_cursors(ctx, atlas->cursors);
+		nk_style_set_font(ctx, &font->handle);
+	}
+
+	static char s_dev_ip_str[16] = { 0 };
+	static char s_target_ip_str[16] = { 0 };
+
+	static int s_max_ip_len = 16;
+	static bool s_pressed_connect = false;
+	static connect_status_t s_connect_status;
+
+	while (!isQuit)
+	{
+		isQuit = glfwWindowShouldClose(win);
+
+
+		// Start rendering
+		
+		float time = 0.25f * powf(glfwGetTime(), 2.0f);
+		float alpha = time > 1.0f ? 1.0f : time;
+
+		glm_vec3 bg = glm_vec3(0.25f, 0.02f, 0.005f);
+
+		glClearColor(alpha * bg.r, alpha * bg.g, alpha * bg.b, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		nk_glfw3_new_frame();
+
+		if (nk_begin(ctx, "Connection", nk_rect(50, 50, 240, 200),
+			NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_TITLE))
+		{
+
+			nk_layout_row_dynamic(ctx, 20, 1);
+			nk_label(ctx, "Network device IP:",NK_TEXT_CENTERED);
+
+			//nk_edit_string(ctx, NK_EDIT_FIELD, s_dev_ip_str, &s_dev_ip_len, s_dev_ip_len, nk_filter_default);
+			nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, s_dev_ip_str, s_max_ip_len, nk_filter_default);
+/*
+			//printf("%s\n", s_dev_ip_str);
+			nk_label(ctx, "Target IP:",NK_TEXT_CENTERED);
+
+			nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, s_target_ip_str, s_max_ip_len, nk_filter_default);
+*/			/*
+			if (s_connect_state == UNKNOWN_STATE)
+			{
+				// Padding
+				nk_layout_row_dynamic(ctx, 1, 1);
+			}
+			else*/
+			{
+				const char *message = "";
+				bool success;
+
+				if (s_pressed_connect)
+				{
+					success = s_connect_status == CONNECTION_STATUS_SUCCEEDED;
+					switch (s_connect_status)
+					{
+						case CONNECTION_STATUS_COULD_NOT_FIND_DEVICE: message = "Couldn't find device!"; break;
+						case CONNECTION_STATUS_SUCCEEDED: message = "Successful connection!"; break;
+					}
+				}
+
+				nk_label(ctx, message, NK_TEXT_CENTERED);
+			}
+
+			nk_layout_row_dynamic(ctx, 20, 2);
+
+			if (nk_button_label(ctx, "Sniff cock...")) 
+			{
+				/* event handling */
+				s_pressed_connect = true;
+
+				// Set ip from text box, to config struct
+				sscanf(s_dev_ip_str, "%hhu.%hhu.%hhu.%hhu", &config.dev_ip.byte1,
+					&config.dev_ip.byte2,
+					&config.dev_ip.byte3,
+					&config.dev_ip.byte4);
+
+				s_connect_status = sniff_cock(&sniffer, &config);
+			}
+
+			if (nk_button_label(ctx, "Kill cock sniffer!"))
+			{
+				kill_cock_sniffer(&sniffer);
+				printf("Cock has been slayed!\n");
+			}
+
+		}
+		nk_end(ctx);
+
+		nk_glfw3_render(NK_ANTI_ALIASING_ON, 65565, 65565);
+		
+		glfwSwapBuffers(win);
+
+
+		glfwPollEvents();
+	}
+
+	nk_glfw3_shutdown();
+	glfwTerminate();
 
 	return 0;
 }
