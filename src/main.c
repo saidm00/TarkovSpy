@@ -41,10 +41,14 @@ typedef struct ip_address{
 typedef struct
 {
 	ip_address dev_ip;
+	ip_address pc_ip;
+	uint16_t min_port;
+	uint16_t max_port;
 } config_t;
 
 /* IPv4 header */
-typedef struct ip_header{
+typedef struct ip_header
+{
 	u_char	ver_ihl;		// Version (4 bits) + Internet header length (4 bits)
 	u_char	tos;			// Type of service 
 	u_short tlen;			// Total length 
@@ -56,15 +60,16 @@ typedef struct ip_header{
 	ip_address	saddr;		// Source address
 	ip_address	daddr;		// Destination address
 	u_int	op_pad;			// Option + Padding
-}ip_header;
+} ip_header_t;
 
 /* UDP header*/
-typedef struct udp_header{
+typedef struct udp_header
+{
 	u_short sport;			// Source port
 	u_short dport;			// Destination port
 	u_short len;			// Datagram length
 	u_short crc;			// Checksum
-}udp_header;
+} udp_header_t;
 
 typedef struct packet
 {
@@ -78,10 +83,11 @@ typedef struct packet
 /* Callback function invoked by libpcap for every incoming packet */
 void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data)
 {
+	/* param: users, header: from library, pkt_data: udp type 16 bit header*/
 	struct tm ltime;
 	char timestr[16];
-	ip_header *ih;
-	udp_header *uh;
+	ip_header_t *ih;
+	udp_header_t *uh;
 	u_int ip_len;
 	u_short sport,dport;
 	time_t local_tv_sec;
@@ -94,18 +100,17 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 	/* convert the timestamp to readable format */
 	local_tv_sec = header->ts.tv_sec;
 	localtime_s(&ltime, &local_tv_sec);
-	strftime( timestr, sizeof timestr, "%H:%M:%S", &ltime);
+	strftime( timestr, sizeof(timestr), "%H:%M:%S", &ltime);
 
 	/* print timestamp and length of the packet */
 	printf("%s.%.6d len:%d ", timestr, header->ts.tv_usec, header->len);
 
 	/* retireve the position of the ip header */
-	ih = (ip_header *) (pkt_data +
-		14); //length of ethernet header
+	ih = (ip_header_t *) (pkt_data + 14); //length of ethernet header
 
 	/* retireve the position of the udp header */
 	ip_len = (ih->ver_ihl & 0xF) * 4;
-	uh = (udp_header *) ((u_char*)ih + ip_len);
+	uh = (udp_header_t *) ((u_char*)ih + ip_len);
 
 	/* convert from network byte order to host byte order */
 	sport = ntohs( uh->sport );
@@ -125,7 +130,6 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 		dport);
 
 
-	
 }
 
 typedef enum
@@ -258,10 +262,34 @@ im_so_happy:
 
 	/* At this point, we don't need any more the device list. Free it */
 
-	const char *filter = "ip and udp";
+	char filter[50] = "udp";
+
+	sprintf((char *)filter, "udp && (dst host %hhu.%hhu.%hhu.%hhu) && (src portrange %hu-%hu)",
+		config->pc_ip.byte1,
+		config->pc_ip.byte2,
+		config->pc_ip.byte3,
+		config->pc_ip.byte4,
+		config->min_port,
+		config->max_port);
+
+	printf("%s'\n", filter);
+
 	struct bpf_program prog;
 	err = pcap_compile(sniffer->handle, &prog, filter, true, PCAP_NETMASK_UNKNOWN);
+
+	if (err != 0)
+	{
+		printf("%s\n", "Failed to compile filter program!");
+		goto smells_nasty;
+	}
+
 	err = pcap_setfilter(sniffer->handle, &prog);
+
+	if (err != 0)
+	{
+		printf("%s\n", "Failed to set filter program!");
+		goto smells_nasty;
+	}
 
 	pthread_attr_t attrib;
 	pthread_attr_init(&attrib);
@@ -271,7 +299,7 @@ im_so_happy:
 
 	if (thread_err != 0)
 	{
-		printf("%s\n", "Failed to create thread!\n");
+		printf("%s\n", "Failed to create thread!");
 		goto smells_nasty;
 	}
 
@@ -280,7 +308,7 @@ im_so_happy:
 	status = CONNECTION_STATUS_SUCCEEDED;
 	sniffer->is_sniffing = true;
 
-	printf("%s\n", "Successfully created sniffer thread!\n");
+	printf("%s\n", "Successfully created sniffer thread!");
 
 
 	pthread_attr_destroy(&attrib);
@@ -298,8 +326,10 @@ int main(int argc, char *argv[])
 	config_t config;
 	sniffer_t sniffer;
 
-	zero_default_sniffer(&sniffer);
+	config.min_port = 0;
+	config.max_port = 65535;
 
+	zero_default_sniffer(&sniffer);
 
 	const char *pcap_version = pcap_lib_version();
 	printf("Npcap version: %s\n", pcap_version);
@@ -352,25 +382,31 @@ int main(int argc, char *argv[])
 	{
 		struct nk_font_atlas *atlas;
 		nk_glfw3_font_stash_begin(&atlas);
-		/*struct nk_font *droid = nk_font_atlas_add_from_file(atlas, "../../../extra_font/DroidSans.ttf", 14, 0);*/
-		/*struct nk_font *roboto = nk_font_atlas_add_from_file(atlas, "../../../extra_font/Roboto-Regular.ttf", 14, 0);*/
-		/*struct nk_font *future = nk_font_atlas_add_from_file(atlas, "../../../extra_font/kenvector_future_thin.ttf", 13, 0);*/
-		/*struct nk_font *clean = nk_font_atlas_add_from_file(atlas, "../../../extra_font/ProggyClean.ttf", 12, 0);*/
-		/*struct nk_font *tiny = nk_font_atlas_add_from_file(atlas, "../../../extra_font/ProggyTiny.ttf", 10, 0);*/
-		/*struct nk_font *cousine = nk_font_atlas_add_from_file(atlas, "../../../extra_font/Cousine-Regular.ttf", 13, 0);*/
-		struct nk_font *font = nk_font_atlas_add_from_file(atlas, "../data/fonts/AnonymousPro-Regular.ttf", 13, NULL);
 
-		nk_glfw3_font_stash_end();
+
+		struct nk_font_config font_config;
+		font_config.pixel_snap = true;
+		font_config.oversample_v = 1;
+		font_config.oversample_h = 1;
+
+
+		struct nk_font *font = nk_font_atlas_add_from_file(atlas,
+			"../data/fonts/AnonymousPro-Regular.ttf", 13, &font_config);
+
 		nk_style_load_all_cursors(ctx, atlas->cursors);
 		nk_style_set_font(ctx, &font->handle);
+		nk_glfw3_font_stash_end();
 	}
 
 	static char s_dev_ip_str[16] = { 0 };
-	static char s_target_ip_str[16] = { 0 };
+	static char s_pc_ip_str[16] = { 0 };
 
 	static int s_max_ip_len = 16;
 	static bool s_pressed_connect = false;
 	static connect_status_t s_connect_status;
+
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
 
 	while (!isQuit)
 	{
@@ -379,17 +415,21 @@ int main(int argc, char *argv[])
 
 		// Start rendering
 		
-		float time = 0.25f * powf(glfwGetTime(), 2.0f);
-		float alpha = time > 1.0f ? 1.0f : time;
+		// float time = 0.25f * powf(glfwGetTime(), 2.0f);
+		// float alpha = time > 1.0f ? 1.0f : time;
 
-		glm_vec3 bg = glm_vec3(0.25f, 0.02f, 0.005f);
+		// glm_vec3 bg = glm_vec3(0.64f, 0.65f, 0.62f);
 
-		glClearColor(alpha * bg.r, alpha * bg.g, alpha * bg.b, 1.0f);
+		// glClearColor(alpha * bg.r, alpha * bg.g, alpha * bg.b, 1.0f);
+		
+
 		glClear(GL_COLOR_BUFFER_BIT);
+
+
 		nk_glfw3_new_frame();
 
-		if (nk_begin(ctx, "Connection", nk_rect(50, 50, 240, 200),
-			NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_TITLE))
+		if (nk_begin(ctx, "Connection", nk_rect(50, 50, 280, 220),
+			NK_WINDOW_MOVABLE|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_TITLE))
 		{
 
 			nk_layout_row_dynamic(ctx, 20, 1);
@@ -397,12 +437,13 @@ int main(int argc, char *argv[])
 
 			//nk_edit_string(ctx, NK_EDIT_FIELD, s_dev_ip_str, &s_dev_ip_len, s_dev_ip_len, nk_filter_default);
 			nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, s_dev_ip_str, s_max_ip_len, nk_filter_default);
-/*
+
 			//printf("%s\n", s_dev_ip_str);
 			nk_label(ctx, "Target IP:",NK_TEXT_CENTERED);
 
-			nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, s_target_ip_str, s_max_ip_len, nk_filter_default);
-*/			/*
+			nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, s_pc_ip_str, s_max_ip_len, nk_filter_default);
+			
+			/*
 			if (s_connect_state == UNKNOWN_STATE)
 			{
 				// Padding
@@ -428,21 +469,28 @@ int main(int argc, char *argv[])
 
 			nk_layout_row_dynamic(ctx, 20, 2);
 
-			if (nk_button_label(ctx, "Sniff cock...")) 
+			if (nk_button_label(ctx, "Sniff cock")) 
 			{
 				/* event handling */
 				s_pressed_connect = true;
 
 				// Set ip from text box, to config struct
-				sscanf(s_dev_ip_str, "%hhu.%hhu.%hhu.%hhu", &config.dev_ip.byte1,
+				sscanf((const char *)s_dev_ip_str, "%hhu.%hhu.%hhu.%hhu",
+					&config.dev_ip.byte1,
 					&config.dev_ip.byte2,
 					&config.dev_ip.byte3,
 					&config.dev_ip.byte4);
 
+				sscanf((const char *)s_pc_ip_str, "%hhu.%hhu.%hhu.%hhu",
+					&config.pc_ip.byte1,
+					&config.pc_ip.byte2,
+					&config.pc_ip.byte3,
+					&config.pc_ip.byte4);
+
 				s_connect_status = sniff_cock(&sniffer, &config);
 			}
 
-			if (nk_button_label(ctx, "Kill cock sniffer!"))
+			if (nk_button_label(ctx, "Kill cock sniffer"))
 			{
 				kill_cock_sniffer(&sniffer);
 				printf("Cock has been slayed!\n");
@@ -451,7 +499,7 @@ int main(int argc, char *argv[])
 		}
 		nk_end(ctx);
 
-		nk_glfw3_render(NK_ANTI_ALIASING_ON, 65565, 65565);
+		nk_glfw3_render(NK_ANTI_ALIASING_ON, 65535, 65535);
 		
 		glfwSwapBuffers(win);
 
