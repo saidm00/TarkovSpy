@@ -1,4 +1,4 @@
-[submodule "dep/glm-c"]
+[submodule "deps/glm-c"]
 	path = deps/glm-c
 	url = https://github.com/saidwho12/glm-c
 [submodule "deps/Nuklear"]
