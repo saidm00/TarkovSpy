@@ -383,7 +383,7 @@ int main(int argc, char *argv[])
 		struct nk_font_atlas *atlas;
 		nk_glfw3_font_stash_begin(&atlas);
 
-
+/*
 		struct nk_font_config font_config;
 		font_config.pixel_snap = true;
 		font_config.oversample_v = 1;
@@ -394,7 +394,7 @@ int main(int argc, char *argv[])
 			"../data/fonts/AnonymousPro-Regular.ttf", 13, &font_config);
 
 		nk_style_load_all_cursors(ctx, atlas->cursors);
-		nk_style_set_font(ctx, &font->handle);
+		nk_style_set_font(ctx, &font->handle);*/
 		nk_glfw3_font_stash_end();
 	}
 
