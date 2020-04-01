@@ -10,6 +10,8 @@ add_executable(EFTR
 	"${CMAKE_CURRENT_LIST_DIR}/deps/glad/src/glad.c"
 	"${CMAKE_CURRENT_LIST_DIR}/src/main.c"
 	"${CMAKE_CURRENT_LIST_DIR}/src/unet.h"
+	"${CMAKE_CURRENT_LIST_DIR}/src/ini.h"
+	"${CMAKE_CURRENT_LIST_DIR}/src/ini.c"
 	)
 
 target_link_options(EFTR  PRIVATE "-L${CMAKE_CURRENT_LIST_DIR}/deps/npcap/Lib/x64"
