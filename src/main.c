@@ -754,8 +754,7 @@ int main(int argc, char *argv[])
 	{
 		struct nk_font_atlas *atlas;
 		nk_glfw3_font_stash_begin(&atlas);
-
-		/*
+/*
 		struct nk_font_config font_config;
 		font_config.pixel_snap = true;
 		font_config.oversample_v = 1;
