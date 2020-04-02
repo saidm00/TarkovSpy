@@ -31,6 +31,8 @@
 
 #include "ini.h"
 
+#include <stdatomic.h>
+
 /*
 #include <glm/glm.h>
 */
@@ -104,7 +106,7 @@ typedef struct packet_work
 
 
 static void
-initialize_packet_work(packet_work_t *work)
+zero_packet_work(packet_work_t *work)
 {
 	work->root = NULL;
 	work->size = 0;
@@ -228,13 +230,53 @@ static void remove_work_packet(packet_work_t *work, packet_node_t *node)
 typedef struct packet_analyzer
 {
 	pcap_t *handle;
+
 	pthread_t sniffer_thread;
-	//bool is_sniffing;
 	pthread_t decoder_thread;
-	//bool is_decoding;
-	bool is_working;
+
+	_Atomic _Bool is_working;
+	unsigned int us_batch_delay;
+	//_Atomic _Bool any_thread_errored; // Defaults to false
+
 	pthread_mutex_t mutex;
 } packet_analyzer_t;
+
+/*
+static _Bool is_analyzer_healthy()
+{
+
+}*/
+
+static void zero_analyzer(packet_analyzer_t *analyzer)
+{
+	analyzer->handle = NULL;
+	analyzer->is_working = false;
+}
+
+static void stop_analyzer(packet_analyzer_t *analyzer)
+{
+	if (analyzer->handle != NULL)
+	{
+		pcap_close(analyzer->handle);
+		analyzer->handle = NULL;
+	}
+
+	if (analyzer->is_working)
+	{
+		pthread_mutex_lock(&analyzer->mutex);
+		pthread_kill(analyzer->sniffer_thread, 0);
+		pthread_kill(analyzer->decoder_thread, 0);
+		pthread_mutex_unlock(&analyzer->mutex);
+
+		pthread_mutex_destroy(&analyzer->mutex);
+		analyzer->is_working = false;
+	}
+	//analyzer->is_sniffing = false;
+	//analyzer->is_decoding = false;
+	//zero_default_analyzer(analyzer);
+	//memset(sniffer, 0, sizeof(packet_analyzer_t));
+}
+
 
 typedef struct global_data
 {
@@ -244,8 +286,7 @@ typedef struct global_data
 	config_t config;
 } global_data_t;
 
-static void
-initialize_packet(packet_t *pkt, uint64_t ts,
+static void initialize_packet(packet_t *pkt, uint64_t ts,
 	uint8_t const* data, size_t len, uint32_t ip1, uint32_t ip2, bool ext)
 {
 	pkt->ext = ext;
@@ -257,8 +298,7 @@ initialize_packet(packet_t *pkt, uint64_t ts,
 	pkt->ip2 = ip2;
 }
 
-static void
-destroy_packet(packet_t const* pkt)
+static void destroy_packet(packet_t const* pkt)
 {
 	free(pkt->data);
 }
@@ -283,7 +323,8 @@ static void *run_packet_sniffer(void *user)
 
 	int res;
 
-	while((res = pcap_next_ex(gd->analyzer.handle, &header, &pkt_data)) >= 0)
+	while( ((res = pcap_next_ex(gd->analyzer.handle, &header, &pkt_data)) >= 0)
+		&& gd->analyzer.is_working)
 	{
 		if(res == 0)
 			/* Timeout elapsed */
@@ -319,25 +360,28 @@ static void *run_packet_sniffer(void *user)
 		// Push packet to saved work list
 
 		pthread_mutex_lock(&gd->analyzer.mutex);
-		packet_node_t *pkt_node = push_work_packet(&gd->work, NULL);
 
-		initialize_packet(&pkt_node->value, ts, data, len, ip1, ip2, ext);
+		packet_t pkt;
+
+		initialize_packet(&pkt, ts, data, len, ip1, ip2, ext);
+		packet_node_t *pkt_node = push_work_packet(&gd->work, &pkt);
+
 		pthread_mutex_unlock(&gd->analyzer.mutex);
 
-		printf("0x%08X (%hhu.%hhu.%hhu.%hhu) -> 0x%08X (%hhu.%hhu.%hhu.%hhu)\n",
-			ip1,
-			ih->saddr.byte1,
-			ih->saddr.byte2,
-			ih->saddr.byte3,
-			ih->saddr.byte4,
-			ip2,
-			ih->daddr.byte1,
-			ih->daddr.byte2,
-			ih->daddr.byte3,
-			ih->daddr.byte4
-			);
+		// printf("0x%08X (%hhu.%hhu.%hhu.%hhu) -> 0x%08X (%hhu.%hhu.%hhu.%hhu)\n",
+		// 	ip1,
+		// 	ih->saddr.byte1,
+		// 	ih->saddr.byte2,
+		// 	ih->saddr.byte3,
+		// 	ih->saddr.byte4,
+		// 	ip2,
+		// 	ih->daddr.byte1,
+		// 	ih->daddr.byte2,
+		// 	ih->daddr.byte3,
+		// 	ih->daddr.byte4
+		// 	);
 
-		printf("Packets in cache: %u\n\n", gd->work.size);
+		// printf("Packets in cache: %u\n\n", gd->work.size);
 
 
 
@@ -350,86 +394,90 @@ static void *run_packet_sniffer(void *user)
 
 		printf("%s,%.6d len:%d\n", timestr, header->ts.tv_usec, header->len);*/
 	}
+
+	gd->analyzer.is_working = false;
+	pthread_exit(NULL);
 }
 
+
+static void move_packet_work(packet_work_t *dst, packet_work_t *src)
+{
+	dst->root = src->root;
+	dst->size = src->size;
+	zero_packet_work(src);
+}
+
+// Process packet batch while popping them off linked list
+static bool check_unity_connect(global_data_t *gd, packet_work_t *local_work)
+{
+	size_t i;
+	packet_t pkt;
+
+	while (work_packet_root_exists(local_work))
+	{
+		pkt = work_packet_pop_root(local_work);
+
+		const uint8_t *data = pkt.data;
+		size_t len = pkt.len;
+
+		// Decode packet using UNET specific code
+		if (len <= 3)
+		{
+			// We don't care, too short 8====D
+			goto too_short;
+		}
+
+		uint16_t conn_id = *(uint16_t *)data;
+		if (!conn_id)
+		{
+			uint8_t req = *(uint8_t *) (data+ 2);
+
+			if (req == 0x1) // Connect packet
+			{
+				return true;
+			}
+		}
+
+too_short:
+		// Free data in packet
+		free(pkt.data);
+	}
+
+	return false;
+}
 
 /* Thread running to analyze and decode packets, for possible UNET packets coming from Tarkov servers */
 static void *run_packet_decoder(void *user)
 {
 	global_data_t *gd = (global_data_t *)user;
 	packet_t pkt;
+	packet_work_t local_work;
+	zero_packet_work(&local_work);
 
-	while (true)
+	while (gd->analyzer.is_working)
 	{
 		pthread_mutex_lock(&gd->analyzer.mutex);
-		bool pkt_exists = work_packet_root_exists(&gd->work);
 
-		if (pkt_exists)
-		{
-			pkt = work_packet_pop_root(&gd->work);
-		}
+		if (gd->work.size > 0)
+			move_packet_work(&local_work, &gd->work);
+
 		pthread_mutex_unlock(&gd->analyzer.mutex);
-				
-		if (pkt_exists)
+
+		if (local_work.size > 0)
 		{
-			const uint8_t *data = pkt.data;
-			size_t len = pkt.len;
-
-			// Decode packet using UNET specific code
-			if (len <= 3)
+			printf("Packet batch size: %u\n", local_work.size);
+			if (check_unity_connect(gd, &local_work))
 			{
-				// We don't care, too short 8====D
-				goto too_short;
+				printf("GOT UNITY CONNECT SIGNAL!\n");
+				exit(0);
 			}
-
-			uint16_t conn_id = *(uint16_t *)data;
-			if (!conn_id)
-			{
-				uint8_t req = *(uint8_t *) (data+ 2);
-
-				if (req == 0x1)
-				{
-					printf("CONNECTED TO TARKOV SERVER!!!\n");
-					exit(-1);
-				}
-			}
-
-too_short:
-			// Free data in packet
-			free(pkt.data);
 		}
-		//usleep(1000);
-	}
-}
 
-static void zero_default_analyzer(packet_analyzer_t *analyzer)
-{
-	analyzer->handle = NULL;
-	analyzer->is_working = false;
-}
-
-static void stop_analyzer(packet_analyzer_t *analyzer)
-{
-	if (analyzer->handle != NULL)
-	{
-		pcap_close(analyzer->handle);
-		analyzer->handle = NULL;
+		usleep(gd->analyzer.us_batch_delay); // Delay for accumulating packets
 	}
 
-	if (analyzer->is_working)
-	{
-		pthread_mutex_lock(&analyzer->mutex);
-		pthread_kill(analyzer->sniffer_thread, 0);
-		pthread_kill(analyzer->decoder_thread, 0);
-		pthread_mutex_unlock(&analyzer->mutex);
-
-		pthread_mutex_destroy(&analyzer->mutex);
-		analyzer->is_working = false;
-	}
-	//analyzer->is_sniffing = false;
-	//analyzer->is_decoding = false;
-	//zero_default_analyzer(analyzer);
-	//memset(sniffer, 0, sizeof(packet_analyzer_t));
+	gd->analyzer.is_working = false;
+	pthread_exit(NULL);
 }
 
 static connect_status_t analyze(global_data_t *gd)
@@ -684,7 +732,7 @@ static int read_config_file(config_t *config, const char *filename)
 static void initialize_global_data(global_data_t *gd)
 {
 	int err;
-	initialize_packet_work(&gd->work);
+	zero_packet_work(&gd->work);
 
 	memset(&gd->config, 0, sizeof(config_t));
 	err = read_config_file(&gd->config, "../data/config.ini");
@@ -692,7 +740,10 @@ static void initialize_global_data(global_data_t *gd)
 	if (err)
 		gd->config = create_default_config();
 	
-	zero_default_analyzer(&gd->analyzer);
+	zero_analyzer(&gd->analyzer);
+
+	gd->analyzer.us_batch_delay = 10;
+
 	gd->is_connected = false;
 }
 
@@ -709,7 +760,7 @@ int main(int argc, char *argv[])
 	// nk_init_fixed(&ctx, calloc(1, MAX_MEMORY), MAX_MEMORY, &font);
 
 
-	unsigned int width = 800, height = 450;
+	unsigned int width = 1000, height = 520;
 
 	glfwInit();
 
@@ -754,19 +805,19 @@ int main(int argc, char *argv[])
 	{
 		struct nk_font_atlas *atlas;
 		nk_glfw3_font_stash_begin(&atlas);
-/*
-		struct nk_font_config font_config;
-		font_config.pixel_snap = true;
-		font_config.oversample_v = 1;
-		font_config.oversample_h = 1;
+
+		//struct nk_font_config font_config;
+		//font_config.pixel_snap = true;
+		//font_config.oversample_v = 1;
+		//font_config.oversample_h = 1;
 
 
 		struct nk_font *font = nk_font_atlas_add_from_file(atlas,
-			"../data/fonts/AnonymousPro-Regular.ttf", 13, &font_config);
+			"../data/fonts/AnonymousPro-Regular.ttf", 13, NULL);
 
-		nk_style_load_all_cursors(ctx, atlas->cursors);
-		nk_style_set_font(ctx, &font->handle);*/
 		nk_glfw3_font_stash_end();
+		//nk_style_load_all_cursors(ctx, atlas->cursors);
+		nk_style_set_font(ctx, &font->handle);
 	}
 
 	char network_ip[16] = { 0 };
@@ -790,6 +841,13 @@ int main(int argc, char *argv[])
 	int max_ip_len = 16;
 	bool pressed_connect = false;
 	connect_status_t connect_status;
+	bool config_window_open = false;
+	bool commands_window_open = false;
+	int render_map = 0;
+	int render_loot = 0;
+	int render_enemy_line_of_sight = 0;
+	int render_enemy_vision = 0;
+	float enemy_vision_fov = 75.0f;
 
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -798,6 +856,8 @@ int main(int argc, char *argv[])
 	{
 		isQuit = glfwWindowShouldClose(win);
 
+
+		glfwGetFramebufferSize(win, &width, &height);
 
 		// Start rendering
 		
@@ -813,77 +873,201 @@ int main(int argc, char *argv[])
 
 
 		nk_glfw3_new_frame();
+/* if this assert triggers you allocated space between nk_begin and nk_menubar_begin.
+    If you want a menubar the first nuklear function after `nk_begin` has to be a
+    `nk_menubar_begin` call. Inside the menubar you then have to allocate space for
+    widgets (also supports multiple rows).
+    Example:
+        if (nk_begin(...)) {
+            nk_menubar_begin(...);
+                nk_layout_xxxx(...);
+                nk_button(...);
+                nk_layout_xxxx(...);
+                nk_button(...);
+            nk_menubar_end(...);
+        }
+        nk_end(...);
+    */
 
-		if (nk_begin(ctx, "Connection", nk_rect(50, 50, 280, 220),
-			NK_WINDOW_MOVABLE|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_TITLE|NK_WINDOW_BORDER))
+		const unsigned int desired_h = 20;
+		const struct nk_style_button *style = &ctx->style.button;
+		const unsigned int actual_h = desired_h +2 * style->padding.y + style->rounding;
+
+		//content->h = r.h - (2 * style->padding.y + style->border + style->rounding*2);
+
+		if (nk_begin(ctx, "Main", nk_rect(0, 0, width, actual_h),
+			NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_BACKGROUND))
 		{
+			nk_menubar_begin(ctx);
 
-			nk_layout_row_dynamic(ctx, 20, 1);
-			nk_label(ctx, "Network device IP:",NK_TEXT_CENTERED);
+			const char *menu1 = "Configs";
+			const char *menu2 = "Options";
+			const char *menu3 = "View";
 
-			//nk_edit_string(ctx, NK_EDIT_FIELD, s_dev_ip_str, &s_dev_ip_len, s_dev_ip_len, nk_filter_default);
-			nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, network_ip, 16, nk_filter_default);
+			//nk_layout_space_begin(ctx, NK_STATIC, 500, INT_MAX);
+			//nk_layout_space_push(ctx, nk_rect(0,0,20,10));
 
-			//printf("%s\n", s_dev_ip_str);
-			nk_label(ctx, "Target IP:",NK_TEXT_CENTERED);
-
-			nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, target_ip, 16, nk_filter_default);
-			
-			/*
-			if (s_connect_state == UNKNOWN_STATE)
+			nk_layout_row_template_begin(ctx, desired_h);
+/*
+			nk_layout_row_template_push_static(ctx, 80);
+			if (nk_menu_begin_text(ctx, menu1, strlen(menu1), NK_TEXT_CENTERED, nk_vec2(200,200)))
 			{
-				// Padding
-				nk_layout_row_dynamic(ctx, 1, 1);
-			}
-			else*/
-			{
-				const char *message = "";
-				bool success;
-
-				if (pressed_connect)
+				nk_layout_row_dynamic(ctx, 20, 1);
+				if (nk_menu_item_label(ctx, "Config", NK_TEXT_LEFT) && !config_window_open)
 				{
-					success = connect_status == CONNECTION_STATUS_SUCCEEDED;
-					switch (connect_status)
-					{
-						case CONNECTION_STATUS_COULD_NOT_FIND_DEVICE: message = "Couldn't find device!"; break;
-						case CONNECTION_STATUS_SUCCEEDED: message = "Successful connection!"; break;
-					}
+					config_window_open = true;
+				}
+				nk_menu_end(ctx);
+			}
+*/
+			nk_layout_row_template_push_static(ctx, 80);
+			if (nk_menu_begin_text(ctx, menu2, strlen(menu2), NK_TEXT_CENTERED, nk_vec2(200,200)))
+			{
+				nk_layout_row_dynamic(ctx, 20, 1);
+				
+				if (nk_menu_item_label(ctx, "Map Options", NK_TEXT_LEFT) && !config_window_open)
+				{
 				}
 
-				nk_label(ctx, message, NK_TEXT_CENTERED);
+				nk_menu_end(ctx);
 			}
 
-			nk_layout_row_dynamic(ctx, 20, 2);
-
-			if (nk_button_label(ctx, "Analyze")) 
+			nk_layout_row_template_push_static(ctx, 80);
+			if (nk_menu_begin_text(ctx, menu3, strlen(menu3), NK_TEXT_CENTERED, nk_vec2(200,200)))
 			{
-				/* event handling */
-				pressed_connect = true;
+				nk_layout_row_dynamic(ctx, 20, 1);
+				
+				if (nk_menu_item_label(ctx, "Player Info", NK_TEXT_LEFT))
+				{
+				}
+				if (nk_menu_item_label(ctx, "Loot Filter", NK_TEXT_LEFT))
+				{
+				}
+				if (nk_menu_item_label(ctx, "Commands", NK_TEXT_LEFT) && !commands_window_open)
+				{
+					commands_window_open = true;
+				}
 
-				// Set ip from text box, to config struct
-				sscanf((const char *)network_ip, "%hhu.%hhu.%hhu.%hhu",
-					&gd.config.network_ip.byte1,
-					&gd.config.network_ip.byte2,
-					&gd.config.network_ip.byte3,
-					&gd.config.network_ip.byte4);
-
-				sscanf((const char *)target_ip, "%hhu.%hhu.%hhu.%hhu",
-					&gd.config.target_ip.byte1,
-					&gd.config.target_ip.byte2,
-					&gd.config.target_ip.byte3,
-					&gd.config.target_ip.byte4);
-
-				connect_status = analyze(&gd);
+				nk_menu_end(ctx);
 			}
+			//nk_menu_begin_text(ctx, title, strlen(title), 0, nk_vec2(20, 10));
+			//nk_menu_end(ctx);
 
-			if (nk_button_label(ctx, "Stop"))
-			{
-				stop_analyzer(&gd.analyzer);
-				printf("Cock has been slayed!\n");
-			}
-
+			
+			nk_menubar_end(ctx);
 		}
 		nk_end(ctx);
+
+		if (commands_window_open)
+		{
+			int w = 250;
+			int h = 290;
+			int x = width/2 - w/2;
+			int y = height/2 - h/2;
+
+			int status = nk_begin(ctx, "Commands", nk_rect(x, y, w, h),
+				NK_WINDOW_MOVABLE|NK_WINDOW_TITLE|NK_WINDOW_BORDER|NK_WINDOW_SCALABLE|NK_WINDOW_CLOSABLE);
+
+			if (status != 0)
+			{
+				nk_layout_row_dynamic(ctx, 20, 2);
+				nk_label(ctx, "Network IP:",NK_TEXT_CENTERED);
+
+				//nk_edit_string(ctx, NK_EDIT_FIELD, s_dev_ip_str, &s_dev_ip_len, s_dev_ip_len, nk_filter_default);
+				nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, network_ip, 16, nk_filter_default);
+
+				//printf("%s\n", s_dev_ip_str);
+				nk_label(ctx, "Target IP:",NK_TEXT_CENTERED);
+
+				nk_edit_string_zero_terminated(ctx,NK_EDIT_FIELD, target_ip, 16, nk_filter_default);
+
+				//nk_layout_row_dynamic(ctx, 20, 3);
+				//nk_layout_row_template_begin(ctx, 20);
+				//nk_layout_row_template_push_dynamic(ctx);
+				//nk_layout_row_dynamic(ctx, 20, 2);
+				//nk_label(ctx, "Batch Delay:", NK_TEXT_CENTERED);
+
+				//nk_layout_row_template_push_static(ctx, 100);
+				//nk_slider_int(ctx, 1, (int *)&gd.analyzer.ms_batch_delay, 16, 1);
+
+				nk_layout_row_dynamic(ctx, 20, 1);
+				nk_property_int(ctx, "Batch Delay", 5, (int *)&gd.analyzer.us_batch_delay, 1000, 5, 1);
+
+				char us_batch_delay_str[20] = { 0 };
+				sprintf(us_batch_delay_str, "%lu", gd.analyzer.us_batch_delay);
+				//nk_layout_row_template_end(ctx);
+				//nk_label(ctx, ms_batch_delay_str, NK_TEXT_LEFT);
+
+
+				nk_layout_row_dynamic(ctx, 20, 1);
+				nk_checkbox_label(ctx, "Show Map", &render_map);
+
+				nk_layout_row_dynamic(ctx, 20, 1);
+				nk_checkbox_label(ctx, "Show Loot", &render_loot);
+
+				nk_layout_row_dynamic(ctx, 20, 1);
+				nk_checkbox_label(ctx, "Render Enemy's Line of Sight", &render_enemy_line_of_sight);
+
+				nk_layout_row_dynamic(ctx, 20, 1);
+				nk_checkbox_label(ctx, "Render Enemy's View", &render_enemy_vision);
+
+
+				//nk_layout_row_dynamic(ctx, 20, 2);
+				//nk_label(ctx, "Enemy FOV (degrees):", NK_TEXT_CENTERED);
+
+				//char fov_str[20] = { 0 };
+				//sprintf(fov_str, "%3.1f", enemy_vision_fov);
+
+				//nk_layout_row_template_begin(ctx, 20);
+				//nk_layout_row_template_push_dynamic(ctx);
+				//nk_layout_row_dynamic(ctx, 20, 2);
+				//nk_label(ctx, fov_str, NK_TEXT_LEFT);
+				//nk_layout_row_template_push_static(ctx, 70);
+				nk_property_float(ctx, "Enemy FOV", 50.0f, (float *)&enemy_vision_fov, 75.0f, 1.0f, 1.0f);
+				//nk_slider_float(ctx, 50.0f, (float *)&enemy_vision_fov, 75.0f, 1.0f);
+				//nk_layout_row_template_end(ctx);
+
+				nk_layout_row_dynamic(ctx, 20, 2);
+				if (nk_button_label(ctx, "Analyze") && !gd.analyzer.is_working) 
+				{
+					/* event handling */
+					pressed_connect = true;
+
+					// Set ip from text box, to config struct
+					sscanf((const char *)network_ip, "%hhu.%hhu.%hhu.%hhu",
+						&gd.config.network_ip.byte1,
+						&gd.config.network_ip.byte2,
+						&gd.config.network_ip.byte3,
+						&gd.config.network_ip.byte4);
+
+					sscanf((const char *)target_ip, "%hhu.%hhu.%hhu.%hhu",
+						&gd.config.target_ip.byte1,
+						&gd.config.target_ip.byte2,
+						&gd.config.target_ip.byte3,
+						&gd.config.target_ip.byte4);
+
+					connect_status = analyze(&gd);
+				}
+
+				if (nk_button_label(ctx, "Stop Analyzer") && gd.analyzer.is_working)
+				{
+					stop_analyzer(&gd.analyzer);
+					printf("Cock has been slayed!\n");
+				}
+
+				nk_layout_row_dynamic(ctx, 20, 1);
+				if (nk_button_label(ctx, "Save to INI"))
+				{
+
+				}
+			}
+			else
+			{
+				commands_window_open = false;
+			}
+
+			nk_end(ctx);
+		}
 
 		nk_glfw3_render(NK_ANTI_ALIASING_ON, 65535, 65535);
 		
