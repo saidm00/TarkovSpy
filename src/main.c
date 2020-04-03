@@ -28,14 +28,56 @@
 #include <time.h>
 
 #include <unistd.h>
+#include <stdatomic.h>
 
 #include "ini.h"
+#include "unet.h"
 
-#include <stdatomic.h>
+#include "world.h"
+#include "bytestream.h"
+#include "network.h"
 
 /*
 #include <glm/glm.h>
 */
+
+static const uint16_t MAX_FRAGMENTED_MESSAGES;
+
+typedef struct MessageFragment
+{
+	size_t size;
+	uint8_t *data;
+} MessageFragment;
+
+static void InitializeMessageFragment(MessageFragment *fragment, size_t size, const void *data)
+{
+	fragment->data = malloc(size);
+	fragment->size = size;
+	memcpy(fragment->data, data, size);
+}
+
+static void DestroyMessageFragment(MessageFragment *fragment)
+{
+	free(fragment->data);
+	fragment->size = 0;
+	fragment->data = NULL;
+}
+
+/*
+typedef struct FragmentedMessage
+{
+	StretchyArray fragments;
+} FragmentedMessage;
+
+static void InitializeFragmentedMessage(FragmentedMessage *message)
+{
+	InitializeStretchyArray(&message->fragments, sizeof(MessageFragment));
+}
+
+static void DestroyFragmentedMessage(FragmentedMessage *message)
+{
+	DestroyStretchyArray(&message->fragments);
+}*/
 
 
 /* 4 bytes IP address */
@@ -86,7 +128,7 @@ typedef struct packet
 	uint8_t *data;
 	size_t len;
 	uint32_t ip1, ip2;
-	bool ext; // External packet
+	bool outbound; // External packet
 } packet_t;
 
 typedef struct packet_node packet_node_t;
@@ -227,7 +269,7 @@ static void remove_work_packet(packet_work_t *work, packet_node_t *node)
 	--work->size;
 }
 
-typedef struct packet_analyzer
+typedef struct Analyzer
 {
 	pcap_t *handle;
 
@@ -235,25 +277,20 @@ typedef struct packet_analyzer
 	pthread_t decoder_thread;
 
 	_Atomic _Bool is_working;
-	unsigned int us_batch_delay;
+	_Atomic unsigned int ms_batch_delay;
 	//_Atomic _Bool any_thread_errored; // Defaults to false
 
 	pthread_mutex_t mutex;
-} packet_analyzer_t;
+} Analyzer_t;
 
-/*
-static _Bool is_analyzer_healthy()
-{
 
-}*/
-
-static void zero_analyzer(packet_analyzer_t *analyzer)
+static void zero_analyzer(Analyzer_t *analyzer)
 {
 	analyzer->handle = NULL;
 	analyzer->is_working = false;
 }
 
-static void stop_analyzer(packet_analyzer_t *analyzer)
+static void stop_analyzer(Analyzer_t *analyzer)
 {
 	if (analyzer->handle != NULL)
 	{
@@ -274,22 +311,28 @@ static void stop_analyzer(packet_analyzer_t *analyzer)
 	//analyzer->is_sniffing = false;
 	//analyzer->is_decoding = false;
 	//zero_default_analyzer(analyzer);
-	//memset(sniffer, 0, sizeof(packet_analyzer_t));
+	//memset(sniffer, 0, sizeof(Analyzer_t));
 }
 
 
 typedef struct global_data
 {
-	bool is_connected;
 	packet_work_t work;
-	packet_analyzer_t analyzer;
+	Analyzer_t analyzer;
 	config_t config;
+	
+	bool is_connected; // To Tarkov server
+	uint32_t server_ip, client_ip;
+
+	World world;
+	
+	HashRecord fragmentedMessages;
 } global_data_t;
 
 static void initialize_packet(packet_t *pkt, uint64_t ts,
-	uint8_t const* data, size_t len, uint32_t ip1, uint32_t ip2, bool ext)
+	uint8_t const* data, size_t len, uint32_t ip1, uint32_t ip2, bool outbound)
 {
-	pkt->ext = ext;
+	pkt->outbound = outbound;
 	pkt->ts = ts;
 	pkt->data = malloc(len);
 	memcpy(pkt->data, data, len);
@@ -303,7 +346,7 @@ static void destroy_packet(packet_t const* pkt)
 	free(pkt->data);
 }
 
-// /* Callback function invoked by libpcap for every incoming packet */
+// /* Callback function invoked by libpcap for every outbound packet */
 // void packet_handler(u_char *user_data, const struct pcap_pkthdr *header, const u_char *pkt_data)
 // {
 // }
@@ -340,7 +383,7 @@ static void *run_packet_sniffer(void *user)
 		uint64_t ts;
 		uint8_t *data;
 		uint32_t ip1, ip2;
-		bool ext;
+		bool outbound;
 		size_t len;
 
 		ts = header->ts.tv_sec;
@@ -355,7 +398,7 @@ static void *run_packet_sniffer(void *user)
 		ip2 = *(uint32_t *)&ih->daddr;
 		data = (uint8_t *)&pkt_data[14 + ip_len + 8];
 		len = uh->len;
-		ext = memcmp((void *)&ip1, (void *)&gd->config.target_ip, sizeof(uint32_t));
+		outbound = memcmp((void *)&ip1, (void *)&gd->config.target_ip, sizeof(uint32_t));
 
 		// Push packet to saved work list
 
@@ -363,7 +406,7 @@ static void *run_packet_sniffer(void *user)
 
 		packet_t pkt;
 
-		initialize_packet(&pkt, ts, data, len, ip1, ip2, ext);
+		initialize_packet(&pkt, ts, data, len, ip1, ip2, outbound);
 		packet_node_t *pkt_node = push_work_packet(&gd->work, &pkt);
 
 		pthread_mutex_unlock(&gd->analyzer.mutex);
@@ -408,42 +451,145 @@ static void move_packet_work(packet_work_t *dst, packet_work_t *src)
 }
 
 // Process packet batch while popping them off linked list
-static bool check_unity_connect(global_data_t *gd, packet_work_t *local_work)
+static void do_network(global_data_t *gd, packet_work_t *local_work)
 {
 	size_t i;
-	packet_t pkt;
+	packet_t const* pkt;
 
 	while (work_packet_root_exists(local_work))
 	{
-		pkt = work_packet_pop_root(local_work);
-
-		const uint8_t *data = pkt.data;
-		size_t len = pkt.len;
+		pkt = &local_work->root->value;
+		const uint8_t *data = pkt->data;
+		size_t len = pkt->len;
 
 		// Decode packet using UNET specific code
 		if (len <= 3)
 		{
-			// We don't care, too short 8====D
-			goto too_short;
+			// We don't care, too short
+			goto destroy_packet;
 		}
 
-		uint16_t conn_id = *(uint16_t *)data;
-		if (!conn_id)
-		{
-			uint8_t req = *(uint8_t *) (data+ 2);
+		// Handle as if communication between server and client
+		uint32_t ip1 = pkt->ip1;
+		uint32_t ip2 = pkt->ip2;
+		bool outbound = pkt->outbound;
+		static UNETAcksCache inbound_acks;
+		static UNETAcksCache outbound_acks;
 
-			if (req == 0x1) // Connect packet
+		uint16_t connectionID = UNETDecodeConnectionId( (void *)data );
+		if (!gd->is_connected)
+		{
+			// Client isn't connected to server, check for UNET connect signal
+			if (!connectionID)
 			{
-				return true;
+				if (data[2] == UNET_SYSTEM_REQUEST_CONNECT)
+				{
+					UNETAcksCacheInit(&inbound_acks, "INBOUND");
+					UNETAcksCacheInit(&outbound_acks, "OUTBOUND");
+
+					gd->is_connected = true;
+					gd->server_ip = ip1;
+					gd->client_ip = ip2;
+					printf("Connected to server!\n");
+				}
+			}
+		}
+		else
+		{
+			// Connected to server
+			if (ip1 == gd->server_ip && ip2 == gd->client_ip
+				|| ip2 == gd->server_ip && ip1 == gd->client_ip)
+			{
+				// Logic says packet is either from server to client
+				// or from client to server...
+				
+				// Read Unity header out
+				UNETNetPacketHeader *hdr = (UNETNetPacketHeader *)data;
+				UNETDecodeNetPacketHeader(hdr);
+				data += sizeof(UNETNetPacketHeader);
+				len -= sizeof(UNETNetPacketHeader);
+
+				// Read Acks
+				UNETPacketAcks128 *acks = (UNETPacketAcks128 *)data; // Ignored??
+				data += sizeof(UNETPacketAcks128);
+				len -= sizeof(UNETPacketAcks128);
+
+				//printf("HI 0\n");
+				UNETAcksCache *received_acks = outbound ? &outbound_acks : &inbound_acks;
+				UNETMessageExtractor extractor;
+				UNETMessageExtractor_Init(&extractor, (char *)data, (uint16_t)len, 3 + (102*2) /* ?? */);
+
+				while (UNETMessageExtractor_GetNextMessage(&extractor))
+				{
+					uint8_t *message_data = NULL;
+					size_t message_len = 0;
+
+					//printf("HI 1\n");
+					uint8_t* user_data = (uint8_t*)UNETMessageExtractor_GetMessageStart(&extractor);
+					uint16_t user_len = UNETMessageExtractor_GetMessageLength(&extractor);
+					uint8_t channelID = UNETMessageExtractor_GetChannelId(&extractor);
+
+					//printf("HI 2\n");
+					if (channelID == 0 || channelID == 1 || channelID == 2) // ReliableFragmented
+					{
+
+					}
+					else
+					{
+						if (channelID % 2 == 1) // Odd channelID
+						{
+							UNETNetMessageReliableHeader *hr = (UNETNetMessageReliableHeader *)user_data;
+							UNETDecodeNetMessageReliableHeader(hr);
+							if (!UNETAcksReadMessage(received_acks, hr->messageId))
+							{
+								//printf("HI 3\n");
+								continue;
+							}
+						}
+
+						// channelID % 2 == 0 does not have UNETNetMessageReliableHeader but skip same bytes so this works
+						size_t headerSkip = sizeof(UNETNetMessageReliableHeader)
+							+ sizeof(UNETNetMessageOrderedHeader);
+						
+						user_data += headerSkip;
+						user_len -= headerSkip;
+
+						// Allocate buffer for complete message, which is freed after ProcessAction is finished
+						message_len = user_len;
+						//pthread_mutex_lock(&gd->analyzer.mutex);
+						message_data = malloc(message_len);
+						memcpy(message_data, user_data, message_len);
+						//pthread_mutex_unlock(&gd->analyzer.mutex);
+						
+						//printf("HI 4\n");
+					}
+
+					if (message_data != NULL)
+					{
+						ByteStream stream;
+
+						//pthread_mutex_lock(&gd->analyzer.mutex);
+
+						InitializeByteStream(&stream, message_data, message_len);
+						ProcessActions(&stream, channelID, outbound);
+						DestroyByteStream(&stream);
+						free(message_data);
+						
+						//pthread_mutex_unlock(&gd->analyzer.mutex);
+					}
+				}
+			}
+			else
+			{
+				// Wrong state
 			}
 		}
 
-too_short:
+destroy_packet:
 		// Free data in packet
-		free(pkt.data);
+		free(pkt->data);
+		work_packet_pop_root(local_work);
 	}
-
-	return false;
 }
 
 /* Thread running to analyze and decode packets, for possible UNET packets coming from Tarkov servers */
@@ -456,24 +602,23 @@ static void *run_packet_decoder(void *user)
 
 	while (gd->analyzer.is_working)
 	{
-		pthread_mutex_lock(&gd->analyzer.mutex);
-
 		if (gd->work.size > 0)
+		{
+			pthread_mutex_lock(&gd->analyzer.mutex);
 			move_packet_work(&local_work, &gd->work);
-
-		pthread_mutex_unlock(&gd->analyzer.mutex);
-
+			pthread_mutex_unlock(&gd->analyzer.mutex);
+		}
+		
 		if (local_work.size > 0)
 		{
-			printf("Packet batch size: %u\n", local_work.size);
-			if (check_unity_connect(gd, &local_work))
-			{
-				printf("GOT UNITY CONNECT SIGNAL!\n");
-				exit(0);
-			}
+			//printf("Packet batch size: %u\n", local_work.size);
+			do_network(gd, &local_work);
 		}
-
-		usleep(gd->analyzer.us_batch_delay); // Delay for accumulating packets
+		else
+		{
+			usleep(gd->analyzer.ms_batch_delay * 1000); // Delay for accumulating packets
+		}
+		
 	}
 
 	gd->analyzer.is_working = false;
@@ -742,9 +887,12 @@ static void initialize_global_data(global_data_t *gd)
 	
 	zero_analyzer(&gd->analyzer);
 
-	gd->analyzer.us_batch_delay = 10;
-
+	gd->analyzer.ms_batch_delay = 1;
 	gd->is_connected = false;
+
+	InitializeHashRecord(&gd->fragmentedMessages, MAX_FRAGMENTED_MESSAGES,
+		sizeof(uint16_t) /* fragmentedMessageId | channelID << 8 */,
+		sizeof(StretchyArray) /* std::vector<MessageFragment> */);
 }
 
 int main(int argc, char *argv[])
@@ -991,10 +1139,10 @@ int main(int argc, char *argv[])
 				//nk_slider_int(ctx, 1, (int *)&gd.analyzer.ms_batch_delay, 16, 1);
 
 				nk_layout_row_dynamic(ctx, 20, 1);
-				nk_property_int(ctx, "Batch Delay", 5, (int *)&gd.analyzer.us_batch_delay, 1000, 5, 1);
+				nk_property_int(ctx, "Batch Delay", 1, (int *)&gd.analyzer.ms_batch_delay, 1000, 1, 1);
 
-				char us_batch_delay_str[20] = { 0 };
-				sprintf(us_batch_delay_str, "%lu", gd.analyzer.us_batch_delay);
+				char ms_batch_delay_str[20] = { 0 };
+				sprintf(ms_batch_delay_str, "%lu", gd.analyzer.ms_batch_delay);
 				//nk_layout_row_template_end(ctx);
 				//nk_label(ctx, ms_batch_delay_str, NK_TEXT_LEFT);
 
