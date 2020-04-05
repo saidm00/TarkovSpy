@@ -26,15 +26,17 @@ bool HashRecordQueryExists(const HashRecord *rec, const HashKey *key);
 
 bool HashRecordQueryExistsByIndex(const HashRecord *rec, uint64_t index);
 
-const void *HashRecordQuery(const HashRecord *rec, const HashKey *key);
+void *HashRecordQuery(const HashRecord *rec, const HashKey *key);
 
-const void *HashRecordQueryByIndex(const HashRecord *rec, uint64_t index);
+void *HashRecordQueryByIndex(const HashRecord *rec, uint64_t index);
 
 bool HashRecordInsert(HashRecord *rec, const HashKey *key, const void *item);
 
 bool HashRecordInsertByIndex(HashRecord *rec, uint64_t index, const void *item);
 
 void DestroyHashRecord(HashRecord *rec);
+
+bool HashRecordRemoveByIndex(HashRecord *rec, uint64_t index);
 
 
 #endif // HASHRECORD_H

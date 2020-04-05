@@ -1,4 +1,5 @@
 #include "network.h"
+
 #include <stdio.h>
 
 static Observer DeserializeObserver(ByteStream *stream)
@@ -72,12 +73,24 @@ static void ProcessGameUpdateOutbound(ByteStream *stream, uint8_t channelID)
 
 void ProcessActions(ByteStream *stream, uint8_t channelID, bool outbound)
 {
-    uint16_t head = 0;
+    size_t head = 0;
 
-    while (head < stream->len)
+    while (ByteStreamRemaining(stream))
     {
         uint16_t len = ByteStreamReadUInt16(stream);
         ActionCode ac = (ActionCode)ByteStreamReadUInt16(stream);
+
+        const char *codeString = ActionCodeToString(ac);
+        //printf("Processing action with code: 0x%04hX (%s)\n", ac, codeString);
+
+        if (IsActionStringUnknown(codeString))
+        {
+            // Unknown action code
+        }
+        else
+        {
+            printf("Processing action with code: 0x%04hX (%s)\n", ac, codeString);  
+        }
 
         if (outbound)
         {
@@ -90,9 +103,6 @@ void ProcessActions(ByteStream *stream, uint8_t channelID, bool outbound)
         }
         else
         {
-            // TODO: Remove debug print
-            printf("Processing action with code: %hx (%s)\n", ac, ActionCodeToString(ac));
-
             switch (ac)
             {
                 case ACTION_CODE_SERVER_INIT: ProcessServerInit(stream); break;
@@ -106,10 +116,11 @@ void ProcessActions(ByteStream *stream, uint8_t channelID, bool outbound)
                 case ACTION_CODE_OBSERVER_UNSPAWN: ProcessObserverUnspawn(stream); break;
                 case ACTION_CODE_BATTLE_EYE: break; // Ignored
                 case ACTION_CODE_GAME_UPDATE: ProcessGameUpdate(stream, channelID); break;
+                default: break; // Unknown
             }
         }
 
-        head += len + 2 * sizeof(uint16_t);
+        head += len + 4; // 4 is 2 * sizeof(uint16_t)
         ByteStreamSeek(stream, head);
     }
 }

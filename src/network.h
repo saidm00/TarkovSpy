@@ -1,6 +1,7 @@
 #ifndef NETWORK_H
 #define NETWORK_H
 
+#include <string.h>
 #include "bytestream.h"
 #include "world.h"
 
@@ -36,6 +37,11 @@ inline const char *ActionCodeToString(ActionCode ac)
 		case ACTION_CODE_GAME_UPDATE:      return "ACTION_CODE_GAME_UPDATE";
 		default: return "UNKNOWN";
 	}
+}
+
+inline bool IsActionStringUnknown(const char *codeString)
+{
+	return strcmp(codeString, "UNKNOWN") == 0;
 }
 
 void ProcessActions(ByteStream *stream, uint8_t channelID, bool outbound);

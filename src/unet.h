@@ -1,7 +1,6 @@
 #ifndef UNET_H
 #define UNET_H
 
-#include <winsock2.h>
 #include <math.h>
 
 #include <string.h>
@@ -9,416 +8,321 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <winsock2.h>
+
+#include "bytestream.h"
 
 //#include "common.h"
 
 /* Unet.h: Header for packet information (Message, net, etc) */
 
 /* System Request flags */
-typedef enum UNETSystemRequest
+typedef enum NetSystemRequest
 {
-    UNET_SYSTEM_REQUEST_CONNECT               = 0x1, 
-    UNET_SYSTEM_REQUEST_CONNECT_VIA_NET_GROUP = 0x2, 
-    UNET_SYSTEM_REQUEST_DISCONNECT            = 0x3,
-    UNET_SYSTEM_REQUEST_HEART_BEAT            = 0x4,
-    UNET_SYSTEM_REQUEST_BROADCAST_DISCOVERY   = 0x9
+    NET_SYSTEM_REQUEST_CONNECT               = 0x1, 
+    NET_SYSTEM_REQUEST_CONNECT_VIA_NET_GROUP = 0x2, 
+    NET_SYSTEM_REQUEST_DISCONNECT            = 0x3,
+    NET_SYSTEM_REQUEST_HEART_BEAT            = 0x4,
+    NET_SYSTEM_REQUEST_BROADCAST_DISCOVERY   = 0x9
 }
-UNETSystemRequest;
-
-/* Contains the connection ID */
-typedef struct UNETPacketBaseHeader
-{
-    uint16_t connectionId;
-}
-UNETPacketBaseHeader;
-
-/* Struct for net packets UwU */
-typedef struct UNETNetPacketHeader
-{
-    UNETPacketBaseHeader baseHeader;
-    uint16_t packetId, sessionId;
-}
-UNETNetPacketHeader;
-
-/* Struct for message packets */
-typedef struct UNETNetMessageHeader
-{
-    uint8_t  channelId;
-    uint16_t len;
-}
-UNETNetMessageHeader;
-
-/* Struct for message ID */
-typedef struct UNETNetMessageReliableHeader
-{
-    uint16_t messageId;
-}
-UNETNetMessageReliableHeader;
-
-/* Struct for the ordered message ID :) */
-typedef struct UNETNetMessageOrderedHeader
-{
-    uint8_t orderedMessageId;
-}
-UNETNetMessageOrderedHeader;
-
-/* Struct for message ID for f*cked up fragmented messages :( */
-typedef struct UNETNetMessageFragmentedHeader
-{
-    uint8_t  fragmentedMessageId;
-    uint8_t  fragmentIdx;
-    uint8_t  fragmentAmnt;
-}
-UNETNetMessageFragmentedHeader;
-
-/* Struct for Acks packet info */
-typedef struct UNETPacketAcks128
-{
-    uint16_t ackMessageId;
-    uint32_t acks[4];
-}
-UNETPacketAcks128;
-
-/* Decode packet base header */
-inline void UNETDecodePacketBaseHeader(UNETPacketBaseHeader* hdr)
-{
-    hdr->connectionId = ntohs(hdr->connectionId);
-}
-
-/* Decode net packet header */
-inline void UNETDecodeNetPacketHeader(UNETNetPacketHeader* hdr)
-{
-    hdr->packetId = ntohs(hdr->packetId);
-}
-
-/* Decode net message packet header */
-inline void UNETDecodeNetMessageHeader(UNETNetMessageHeader* hdr)
-{
-    hdr->len = ntohs(hdr->len);
-}
-
-/* Decode _reliable_ net message packet header */
-inline void UNETDecodeNetMessageReliableHeader(UNETNetMessageReliableHeader* hdr)
-{
-    hdr->messageId = ntohs(hdr->messageId);
-}
-
-/* Decode connection id */
-inline uint16_t UNETDecodeConnectionId(void* packet)
-{
-    UNETPacketBaseHeader* packet_hdr = (UNETPacketBaseHeader *) (packet);
-    UNETDecodePacketBaseHeader(packet_hdr);
-    return packet_hdr->connectionId;
-}
+NetSystemRequest;
 
 /* Error codes */
-typedef enum UNETNetError
+typedef enum NetError
 {
-    UNET_NET_ERROR_OK = 0x0,
-    UNET_NET_ERROR_WRONG_HOST,
-    UNET_NET_ERROR_WRONG_CONNECTION,
-    UNET_NET_ERROR_WRONG_CHANNEL,
-    UNET_NET_ERROR_NO_RESOURCES,
-    UNET_NET_ERROR_BAD_MESSAGE,
-    UNET_NET_ERROR_TIMEOUT,
-    UNET_NET_ERROR_MESSAGE_TOO_LONG,
-    UNET_NET_ERROR_WRONG_OPERATION,
-    UNET_NET_ERROR_VERSION_MISMATCH,
-    UNET_NET_ERROR_CRC_MISMATCH,
-    UNET_NET_ERROR_DNS_FAILURE,
-    UNET_NET_ERROR_USAGE_ERROR,
-    UNET_NET_ERROR_LAST_ERROR
+    NET_ERROR_OK = 0x0,
+    NET_ERROR_WRONG_HOST,
+    NET_ERROR_WRONG_CONNECTION,
+    NET_ERROR_WRONG_CHANNEL,
+    NET_ERROR_NO_RESOURCES,
+    NET_ERROR_BAD_MESSAGE,
+    NET_ERROR_TIMEOUT,
+    NET_ERROR_MESSAGE_TOO_LONG,
+    NET_ERROR_WRONG_OPERATION,
+    NET_ERROR_VERSION_MISMATCH,
+    NET_ERROR_CRC_MISMATCH,
+    NET_ERROR_DNS_FAILURE,
+    NET_ERROR_USAGE_ERROR,
+    NET_ERROR_LAST_ERROR
 }
-UNETNetError;
+NetError;
 
 /* Struct for m_acks data */
-typedef struct UNETAcksCache
+typedef struct AcksCache
 {
-    bool        *m_acks;
-    size_t      m_acks_size;
-    uint16_t    m_head, m_tail, m_window_size;
-    const char  *m_label;
+    bool *acks;
+    size_t length;
+    size_t head, tail, windowLength;
+    const char *label;
 }
-UNETAcksCache;
+AcksCache;
 
 /* Used to resize m_acks array, sets the new size accordingly (probably not needed, can remove later) */
+/*
 inline void UNETAcksResize(UNETAcksCache *cache, size_t size)
 {
     cache->m_acks = (bool *) realloc(cache->m_acks, size);    
     cache->m_acks_size = size;
 }
+*/
 
 /* Returns size of m_acks (probably not needed, can remove later) */
+/*
 inline size_t UNETAcksSize(UNETAcksCache *cache)
 {
     return cache->m_acks_size;
 }
+*/
 
 /* Inits Acks packet info */
-inline void UNETAcksCacheInit(UNETAcksCache *cache, const char *label)
+inline void InitializeAcksCache(AcksCache *cache, const char *label)
 {
-    cache->m_acks = (bool *) calloc(0x10000, sizeof(bool));
- 
-    cache->m_window_size = (UNETAcksSize(cache) / 2) - 1;
- 
-    cache->m_head = cache->m_window_size - 1;
-    cache->m_tail = 1;
- 
-    cache->m_label = label;
+    cache->length = 65536;
+    cache->acks = calloc(cache->length, sizeof(bool));
+    cache->windowLength = (cache->length / 2) - 1;
+    cache->head = cache->windowLength - 1;
+    cache->tail = 1;
+    cache->label = label;
 }
 
 /* Read acks error message */
-inline bool UNETAcksReadMessage(UNETAcksCache *cache, uint16_t message_id)
+inline bool AcksReadMessage(AcksCache *cache, uint16_t messageID)
 {
-    int max_distance = (int) UNETAcksSize(cache);
-    int raw_distance = abs(message_id - cache->m_head);
-    int distance;
-    if (raw_distance < (max_distance / 2))
-    {
-        distance = raw_distance;
-    }
-    else
-    {
-        distance = max_distance - raw_distance;
-    } 
+    size_t maxDistance = cache->length;
+    size_t rawDistance = abs(messageID - cache->head);
+    size_t distance = (rawDistance < (maxDistance / 2)) ? rawDistance : maxDistance - rawDistance;
     
     /* Out of window */
-    if (distance > cache->m_window_size)
+    if (distance > cache->windowLength)
     {
         return false;
     }
     
-    if (message_id < cache->m_tail || message_id > cache->m_head)
+    if (messageID < cache->tail || messageID > cache->head)
     {
         /* TO-DO: "this is suboptimal, could use a second queue of packets to reset instead" --ucectoplasm
         Maybe replace this later down the line??????? */
-        for (int i = 0; i < distance; ++i)
+        for (size_t i = 0; i < distance; ++i)
         {
-            cache->m_acks[cache->m_tail] = false;
-            cache->m_tail = (cache->m_tail + 1) % UNETAcksSize(cache);
-            cache->m_head = (cache->m_head + 1) % UNETAcksSize(cache);
+            cache->acks[cache->tail] = false;
+            cache->tail = (cache->tail + 1) % cache->length;
+            cache->head = (cache->head + 1) % cache->length;
         }
     }
 
-    bool acked = cache->m_acks[message_id];
+    bool acked = cache->acks[messageID];
     if (!acked)
     {
-        cache->m_acks[message_id] = true;
+        cache->acks[messageID] = true;
     }
     
     return !acked;
 }
 
 /* Delimiter tokens for messages (i think) */
-typedef enum UNETMessageDelimeter
+typedef enum MessageDelimeter
 {
-    UNET_MESSAGE_DELIMITER_COMBINED   = 254,
-    UNET_MESSAGE_DELIMITER_RELIABLE  = 255
-}
-UNETMessageDelimeter;
+    MESSAGE_DELIMITER_COMBINED = 254,
+    MESSAGE_DELIMITER_RELIABLE = 255
+} MessageDelimeter;
 
 /* Message packet information */
-typedef struct UNETMessageExtractor
+typedef struct MessageExtractor
 {
-    char*       m_Data;
-    uint16_t    m_TotalLength;
-    uint16_t    m_MaxChannelId;
-    uint8_t     m_Error;
-    uint8_t     m_ChannelId;
-    uint16_t    m_MessageLength;
-    uint16_t    m_FullMessageLength;
-    bool        m_IsMessageCombined;
-    UNETAcksCache*  m_Acks;
+    AcksCache *acks;
+    uint8_t *data;
+    uint16_t totalLength;
+    uint16_t maxChannelID;
+    uint8_t error;
+    uint8_t channelID;
+    uint16_t messageLength;
+    uint16_t fullMessageLength;
+    bool isMessageCombined;
 }
-UNETMessageExtractor;
+MessageExtractor;
 
-/* Various helper functions for the message packet */
-char*       UNETMessageExtractor_GetMessageStart(UNETMessageExtractor *m_ext_base)
+bool DidMessageExtractorError(MessageExtractor *messageExtractor)
 {
-    return m_ext_base->m_Data;
-}
-
-uint16_t    UNETMessageExtractor_GetMessageLength(UNETMessageExtractor *m_ext_base)
-{
-    return m_ext_base->m_MessageLength;
+    return messageExtractor->error != NET_ERROR_OK;
 }
 
-uint8_t     UNETMessageExtractor_GetError(UNETMessageExtractor *m_ext_base)
+// Creates and initializes a MessageExtractor which holds state for parsing messages
+inline MessageExtractor CreateMessageExtractor(ByteStream *stream, uint16_t maxChannelID, AcksCache *acks)
 {
-    return m_ext_base->m_Error;
+    MessageExtractor messageExtractor;
+
+    messageExtractor.acks = acks;
+    messageExtractor.data = ByteStreamHeadAddr(stream);
+    messageExtractor.totalLength = ByteStreamRemaining(stream);
+    messageExtractor.maxChannelID = maxChannelID;
+    messageExtractor.error = NET_ERROR_OK;
+    messageExtractor.channelID = 255;
+    messageExtractor.messageLength = 0;
+    messageExtractor.fullMessageLength = 0;
+    messageExtractor.isMessageCombined = false;
+    
+    return messageExtractor;
 }
 
-bool        UNETMessageExtractor_IsError(UNETMessageExtractor *m_ext_base)
+// Checks if message channelID is valid
+inline bool MessageExtractorIsChannelValid(MessageExtractor *messageExtractor)
 {
-    return m_ext_base->m_Error != (uint8_t) UNET_NET_ERROR_OK;
-}
-
-uint16_t    UNETMessageExtractor_GetRemainingLength(UNETMessageExtractor *m_ext_base)
-{
-    return m_ext_base->m_TotalLength;
-}
-
-uint8_t     UNETMessageExtractor_GetChannelId(UNETMessageExtractor *m_ext_base)
-{
-    return m_ext_base->m_ChannelId;
-}
-
-uint16_t    UNETMessageExtractor_GetFullMessageLength(UNETMessageExtractor *m_ext_base)
-{
-    return m_ext_base->m_FullMessageLength;
-}
-
-bool        UNETMessageExtractor_IsMessageCombined(UNETMessageExtractor *m_ext_base)
-{
-    return m_ext_base->m_IsMessageCombined;
-}
-
-/* TO-DO: Document helper functions for IntelliSense */
-
-/* Inits the packet info */
-inline void UNETMessageExtractor_Init(UNETMessageExtractor *m_ext_base, char* data, uint16_t totalLength, uint8_t maxChannelId)
-{
-    m_ext_base->m_Data = data;
-    m_ext_base->m_TotalLength = totalLength;
-    m_ext_base->m_MaxChannelId = maxChannelId;
-    m_ext_base->m_Error = (uint8_t) UNET_NET_ERROR_OK; // hehe "cock" 
-    m_ext_base->m_ChannelId = 0xFF;
-    m_ext_base->m_MessageLength = 0;
-    m_ext_base->m_FullMessageLength = 0;
-    m_ext_base->m_IsMessageCombined = false;
-}
-
-/* Checks if message channel ID is valid */
-inline bool UNETMessageExtractor_CheckIsChannelValid(UNETMessageExtractor *m_ext_base)
-{
-    if(m_ext_base->m_ChannelId > m_ext_base->m_MaxChannelId)
+    if(messageExtractor->channelID > messageExtractor->maxChannelID)
     {
-        m_ext_base->m_Error = (uint8_t) UNET_NET_ERROR_BAD_MESSAGE;
+        messageExtractor->error = NET_ERROR_BAD_MESSAGE;
         return false;
     }
+
     return true;
 }
 
 /* Checks if message length is valid */
-inline bool UNETMessageExtractor_CheckIsLengthValid(UNETMessageExtractor *m_ext_base)
+inline bool MessageExtractorIsLengthValid(MessageExtractor *messageExtractor)
 {
-    if(m_ext_base->m_TotalLength > m_ext_base->m_MessageLength)
+    if(messageExtractor->totalLength < messageExtractor->messageLength)
     {
-        m_ext_base->m_Error = (uint8_t) UNET_NET_ERROR_BAD_MESSAGE;
+        messageExtractor->error = NET_ERROR_BAD_MESSAGE;
         return false;
     }
     return true;
 }
 
+
+inline bool MessageExtractorGetChannelID(MessageExtractor *messageExtractor)
+{
+    return messageExtractor->channelID;
+}
+
+inline uint16_t MessageExtractorGetMessageLength(MessageExtractor *messageExtractor)
+{
+    return messageExtractor->messageLength;
+}
+
+inline uint8_t *MessageExtractorGetMessageStart(MessageExtractor *messageExtractor)
+{
+    return messageExtractor->data;
+}
+
+
 /* Prototypes for commonly used functions (At least one of these are called in three of the four function definitions below) */
-inline bool UNETMessageExtractor_GetNextMessage(UNETMessageExtractor *m_ext_base);
-inline bool UNETMessageExtractor_ExtractMessageHeader(UNETMessageExtractor *m_ext);
-inline bool UNETMessageExtractor_ExtractMessageLength(UNETMessageExtractor *m_ext_base);
-inline bool UNETMessageExtractor_ExtractMessage(UNETMessageExtractor *m_ext_base);
+inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor);
+inline bool MessageExtractorExtractMessageHeader(MessageExtractor *messageExtractor);
+inline bool MessageExtractorExtractMessageLength(MessageExtractor *messageExtractor);
+//inline bool MessageExtractorGetMessageStart(MessageExtractor *messageExtractor);
+inline bool MessageExtractorExtractMessage(MessageExtractor *messageExtractor);
 
 /* Gets next message from message packet */
-inline bool UNETMessageExtractor_GetNextMessage(UNETMessageExtractor *m_ext_base)
+inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor)
 {
-    m_ext_base->m_IsMessageCombined = false;
-    m_ext_base->m_Data += m_ext_base->m_MessageLength;
-    m_ext_base->m_TotalLength -= m_ext_base->m_MessageLength;
-    m_ext_base->m_FullMessageLength = 0;
-    
-    uint16_t totalLength = m_ext_base->m_TotalLength;
+    printf("len: %hu, %hu\n", messageExtractor->messageLength, messageExtractor->totalLength);
+    messageExtractor->isMessageCombined = false;
+    messageExtractor->data += messageExtractor->messageLength;
+    messageExtractor->totalLength -= messageExtractor->messageLength;
+    messageExtractor->fullMessageLength = 0;
 
-    if (totalLength == 0)
+    if (messageExtractor->totalLength == 0)
         return false;
-    
-    if (totalLength < 2)
+
+    if (messageExtractor->totalLength < 2)
     {
-        m_ext_base->m_Error = (uint8_t) UNET_NET_ERROR_BAD_MESSAGE;
+        messageExtractor->error = (uint8_t)NET_ERROR_BAD_MESSAGE;
         return false;
     }
-    
-    m_ext_base->m_ChannelId = *m_ext_base->m_Data;
-    
-    if (m_ext_base->m_ChannelId == (uint8_t)UNET_MESSAGE_DELIMITER_RELIABLE )
+
+    messageExtractor->channelID = *messageExtractor->data;
+    if (messageExtractor->channelID == (uint8_t)MESSAGE_DELIMITER_RELIABLE)
     {
-        UNETMessageExtractor_ExtractMessageHeader(m_ext_base);
-        UNETNetMessageReliableHeader* hr = (UNETNetMessageReliableHeader *) (m_ext_base->m_Data);
-        UNETDecodeNetMessageReliableHeader(hr);
-        if (!UNETAcksReadMessage(m_ext_base->m_Acks, hr->messageId))
+        printf("Cum 0\n");
+        MessageExtractorExtractMessageHeader(messageExtractor);
+
+        NetMessageReliableHeader* hr = (NetMessageReliableHeader*)messageExtractor->data;
+        hr->messageID = ntohs(hr->messageID);
+
+        if (!AcksReadMessage(messageExtractor->acks, hr->messageID))
         {
-            return UNETMessageExtractor_GetNextMessage(m_ext_base);
+            printf("Cum 1\n");
+            return MessageExtractorGetNextMessage(messageExtractor);
         }
-        m_ext_base->m_Data += sizeof(UNETNetMessageReliableHeader);
-        m_ext_base->m_TotalLength -= sizeof(UNETNetMessageReliableHeader);
-        m_ext_base->m_MessageLength = 0;
-        return UNETMessageExtractor_GetNextMessage(m_ext_base);
+        messageExtractor->data += sizeof(NetMessageReliableHeader);
+        messageExtractor->totalLength -= sizeof(NetMessageReliableHeader);
+        messageExtractor->messageLength = 0;
+        printf("Cum 2\n");
+        return MessageExtractorGetNextMessage(messageExtractor);
     }
-    else if (m_ext_base->m_ChannelId == UNET_MESSAGE_DELIMITER_COMBINED)
+    else if (messageExtractor->channelID == (uint8_t)MESSAGE_DELIMITER_COMBINED)
     {
-           ++m_ext_base->m_Data;
-           --m_ext_base->m_TotalLength;
-           ++m_ext_base->m_FullMessageLength;
-           
-           m_ext_base->m_IsMessageCombined = true;
-           return UNETMessageExtractor_ExtractMessage(m_ext_base);
+        printf("Cum 3\n");
+        
+        ++messageExtractor->data;
+        --messageExtractor->totalLength;
+        ++messageExtractor->fullMessageLength;
+        messageExtractor->isMessageCombined = true;
+        return MessageExtractorExtractMessage(messageExtractor);
     }
-    
-    if (!UNETMessageExtractor_CheckIsChannelValid(m_ext_base))
+
+    printf("Cum 4\n");
+
+    if (!MessageExtractorIsChannelValid(messageExtractor))
         return false;
-    
-    return UNETMessageExtractor_ExtractMessage(m_ext_base);    
+
+    printf("Cum 5\n");
+    return MessageExtractorExtractMessage(messageExtractor); 
 }
 
 /* Extracts header of message packet */
-inline bool UNETMessageExtractor_ExtractMessageHeader(UNETMessageExtractor *m_ext_base)
+inline bool MessageExtractorExtractMessageHeader(MessageExtractor *messageExtractor)
 {
-    m_ext_base->m_ChannelId = *(m_ext_base->m_Data);
+    messageExtractor->channelID = *messageExtractor->data;
     
-    ++(m_ext_base->m_Data);
-    --(m_ext_base->m_TotalLength);
-    ++(m_ext_base->m_FullMessageLength);
+    ++messageExtractor->data;
+    --messageExtractor->totalLength;
+    ++messageExtractor->fullMessageLength;
     
-    return UNETMessageExtractor_ExtractMessageLength(m_ext_base);
+    return MessageExtractorExtractMessageLength(messageExtractor);
 }
 
 /* Fetches message length from message packet */
-inline bool UNETMessageExtractor_ExtractMessageLength(UNETMessageExtractor *m_ext_base)
+inline bool MessageExtractorExtractMessageLength(MessageExtractor *messageExtractor)
 {
-    uint8_t highByte = *(m_ext_base->m_Data);
+    uint8_t highByte = *messageExtractor->data;
     if (highByte & 0x80)
     {
-        if (m_ext_base->m_TotalLength < 2)
+        if (messageExtractor->totalLength < 2)
         {
-            m_ext_base->m_Error = (uint8_t) UNET_NET_ERROR_BAD_MESSAGE;
+            messageExtractor->error = NET_ERROR_BAD_MESSAGE;
             return false;
         }
-        m_ext_base->m_MessageLength = ((highByte & 0x7F) << 8) + (uint8_t) * (m_ext_base->m_Data + 1);
-        m_ext_base->m_TotalLength -= 2;
-        m_ext_base->m_Data += 2;
-        m_ext_base->m_FullMessageLength += 2;
+
+        messageExtractor->messageLength = ((highByte & 0x7F) << 8) + *(messageExtractor->data + 1);
+        messageExtractor->totalLength -= 2;
+        messageExtractor->data += 2;
+        messageExtractor->fullMessageLength += 2;
     }
     else
     {
-        m_ext_base->m_MessageLength = highByte;
-        --(m_ext_base->m_TotalLength);
-        ++(m_ext_base->m_Data);
-        ++(m_ext_base->m_FullMessageLength);
+        messageExtractor->messageLength = highByte;
+        --messageExtractor->totalLength;
+        ++messageExtractor->data;
+        ++messageExtractor->fullMessageLength;
     }
-    m_ext_base->m_FullMessageLength += m_ext_base->m_MessageLength;
+
+    messageExtractor->fullMessageLength += messageExtractor->messageLength;
     return true;
 }
 
 /* Extract message from message packet */
-inline bool UNETMessageExtractor_ExtractMessage(UNETMessageExtractor *m_ext_base)
+inline bool MessageExtractorExtractMessage(MessageExtractor *messageExtractor)
 {
-    if (m_ext_base->m_TotalLength < 2)
+    if (messageExtractor->totalLength < 2)
     {
-        m_ext_base->m_Error = (uint8_t) UNET_NET_ERROR_BAD_MESSAGE;
+        messageExtractor->error = NET_ERROR_BAD_MESSAGE;
         return false;
     }
     
-    if (!UNETMessageExtractor_ExtractMessageHeader(m_ext_base))
+    if (!MessageExtractorExtractMessageHeader(messageExtractor))
         return false;
 
-    if (!UNETMessageExtractor_CheckIsLengthValid(m_ext_base))
+    if (!MessageExtractorIsLengthValid(messageExtractor))
         return false;
     
     return true;
@@ -441,6 +345,7 @@ i might have been a succubus in my past life"
 // *drum riff*
 // ight, imma pop out, sleep well my cum muffin :) UwU OwO 
 // sleep tight little princess cock slayer ;O========8 
+// grandma's backend cum recycler
 
 /*
    _    \    ________
@@ -471,6 +376,8 @@ echo "And then he turned into a pickle! Funniest shit I've ever seen!" | cowsay 
              ||                              ||                             
              ||                              ||
              \\______________________________//
-              \__________BBC_10000___________/
+              \__________BCC_10000___________/
+brb
 */
+
 #endif //UNET_H

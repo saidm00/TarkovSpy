@@ -67,10 +67,40 @@ inline void StretchyArrayPop(StretchyArray *self)
 	}
 }
 
-
-inline void *StretchyBufferAccess(StretchyArray *self, size_t index)
+inline void *StretchyArrayResize(StretchyArray *self, size_t newSize)
 {
-	return (void *) &self->data[ index * self->itemLen ];
+	if (self->size > 0)
+	{
+		self->data = realloc(self->data, newSize * self->itemLen);
+	}
+	else
+	{
+		self->data = malloc(newSize * self->itemLen);
+	}
+
+	self->size = newSize;
 }
 
+inline void *StretchyBufferPopAt(StretchyArray *self, size_t index)
+{
+	if (self->size - 1 == 0)
+	{
+		free(self->data);
+		self->size = 0;
+	}
+	else
+	{
+		for (size_t i = index; i < self->size - 1; ++i)
+		{
+			memcpy((void *)&self->data[(i) * self->itemLen], (const void *)&self->data[(i+1) * self->itemLen], self->itemLen);
+		}
+
+		self->data = realloc(self->data, self->size - 1);
+		--self->size;		
+	}
+}
+
+
+
+// cock sucker. grandmas rusty asscrack. her dry queef is the smell of your breath
 #endif // STRETCHYARRAY_H
