@@ -10,7 +10,7 @@ set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_LIST_DIR}/modules")
 set(BUILD_DIR ${CMAKE_BINARY_DIR})
 set(CMAKE_CURRENT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/bin")
 
-set(CMAKE_C_FLAGS "-Ofast -std=gnu2x -fms-extensions -m64")
+set(CMAKE_C_FLAGS "-std=gnu2x -fms-extensions -m64")
 
 add_subdirectory(deps/TinyCThread)
 
@@ -19,7 +19,7 @@ add_executable(EFTR
 	"${CMAKE_CURRENT_LIST_DIR}/src/ini.h"
 	"${CMAKE_CURRENT_LIST_DIR}/src/ini.c"
 	"${CMAKE_CURRENT_LIST_DIR}/src/nuklear.h"
-	"${CMAKE_CURRENT_LIST_DIR}/src/nuklear_glfw_gl2.h"
+	"${CMAKE_CURRENT_LIST_DIR}/src/nuklear_glfw_gl3.h"
 	"${CMAKE_CURRENT_LIST_DIR}/src/main.c"
 	"${CMAKE_CURRENT_LIST_DIR}/src/unet.h"
 	"${CMAKE_CURRENT_LIST_DIR}/src/hashrecord.h"
@@ -47,3 +47,10 @@ target_include_directories(EFTR PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/deps/glad/include"
 	"${CMAKE_CURRENT_LIST_DIR}/deps/glfw-3.3.2.bin.WIN64/include"
 	)
+
+set_target_properties(EFTR
+    PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)

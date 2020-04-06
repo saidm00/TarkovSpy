@@ -44,8 +44,8 @@ NetError;
 typedef struct AcksCache
 {
     bool *acks;
-    size_t length;
-    size_t head, tail, windowLength;
+    int64_t length;
+    int64_t head, tail, windowLength;
     const char *label;
 }
 AcksCache;
@@ -81,9 +81,9 @@ inline void InitializeAcksCache(AcksCache *cache, const char *label)
 /* Read acks error message */
 inline bool AcksReadMessage(AcksCache *cache, uint16_t messageID)
 {
-    size_t maxDistance = cache->length;
-    size_t rawDistance = (size_t) llabs((int64_t)messageID - (int64_t)cache->head);
-    size_t distance = (rawDistance < (maxDistance / 2)) ? rawDistance : maxDistance - rawDistance;
+    int64_t maxDistance = cache->length;
+    int64_t rawDistance = llabs((long long)messageID - (long long)cache->head);
+    int64_t distance = (rawDistance < (maxDistance / 2)) ? rawDistance : maxDistance - rawDistance;
     
     /* Out of window */
     if (distance > cache->windowLength)
@@ -207,7 +207,7 @@ inline bool MessageExtractorExtractMessage(MessageExtractor *messageExtractor);
 /* Gets next message from message packet */
 inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor)
 {
-    printf("len: %hu, %hu\n", messageExtractor->messageLength, messageExtractor->totalLength);
+    //printf("len: %hu, %hu\n", messageExtractor->messageLength, messageExtractor->totalLength);
     messageExtractor->isMessageCombined = false;
     messageExtractor->data += messageExtractor->messageLength;
     messageExtractor->totalLength -= messageExtractor->messageLength;

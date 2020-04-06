@@ -16,8 +16,8 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#define NK_GLFW_GL2_IMPLEMENTATION
-#include "nuklear_glfw_gl2.h"
+#define NK_GLFW_GL3_IMPLEMENTATION
+#include "nuklear_glfw_gl3.h"
 
 #include <pcap.h> //peniscap
 
@@ -403,7 +403,11 @@ static int run_packet_sniffer(void *user)
 		ip_len = (ih->ver_ihl & 0xF) * 4;
 		uh = (udp_header_t *) (pkt_data + 14 + ip_len);
 		data = (uint8_t *)uh + 8;
-		size = uh->len - 8;
+
+		size = (size_t)ntohs(uh->len);
+		if (size <= 8) continue; // Size less than UDP header, skip
+		size -= 8;
+
 		//data += ip_len;
 		//size -= ip_len;
 
@@ -417,7 +421,6 @@ static int run_packet_sniffer(void *user)
 		// Push packet to saved work list
 
 		packet_t pkt;
-
 		initialize_packet(&pkt, ts, data, size, ip1, ip2, outbound);
 
 		mtx_lock(&gd->analyzer.mutex);
@@ -706,19 +709,16 @@ static int run_packet_decoder(void *user)
 		
 		if (local_work.size > 0)
 		{
-			//printf("Packet batch size: %u\n", local_work.size);
+			printf("Packet batch size: %u\n", local_work.size);
 			ProcessPacketBatch(gd, &local_work);
 		}
-		else
-		{
-			unsigned long milisec = gd->analyzer.ms_batch_delay;
-			struct timespec delay;
-			time_t sec = (time_t)(milisec / 1000);
-			delay.tv_sec = sec;
-			delay.tv_nsec = 0;
+		unsigned long milisec = gd->analyzer.ms_batch_delay;
+		struct timespec delay;
+		time_t sec = (time_t)(milisec / 1000);
+		delay.tv_sec = sec;
+		delay.tv_nsec = 0;
 
-			thrd_sleep(&delay, NULL); // Delay for accumulating packets
-		}
+		thrd_sleep(&delay, NULL); // Delay for accumulating packets
 	}
 
 	gd->analyzer.is_working = false;
@@ -989,6 +989,7 @@ static void initialize_global_data(global_data_t *gd)
 
 	gd->analyzer.ms_batch_delay = 10;
 	gd->is_connected = false;
+	mtx_init(&gd->analyzer.mutex, mtx_plain);
 
 	InitializeHashRecord(&gd->fragmentedMessages, MAX_FRAGMENTED_MESSAGES,
 		sizeof(uint16_t) /* fragmentedMessageID | channelID << 8 */,
@@ -1020,10 +1021,10 @@ int main(int argc, char *argv[])
 
 	glfwInit();
 
-	//glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	//glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint( GLFW_DOUBLEBUFFER, GLFW_FALSE );
 
 	GLFWwindow *win = glfwCreateWindow(width, height, "Grandma's backend cum recycler", NULL, NULL);
@@ -1048,7 +1049,6 @@ int main(int argc, char *argv[])
 	}
 
 	printf("Loaded OpenGL properly!\n");
-
 	printf("OpenGL Version String: %s\n", glGetString(GL_VERSION));
 
 	glViewport(0, 0, width, height);
@@ -1057,6 +1057,7 @@ int main(int argc, char *argv[])
 	bool isQuit = false;
 
 	struct nk_context *ctx = nk_glfw3_init(win, NK_GLFW3_INSTALL_CALLBACKS);
+		
 	{
 		struct nk_font_atlas *atlas;
 		nk_glfw3_font_stash_begin(&atlas);
@@ -1163,7 +1164,7 @@ int main(int argc, char *argv[])
 			//nk_layout_space_push(ctx, nk_rect(0,0,20,10));
 
 			nk_layout_row_template_begin(ctx, desired_h);
-/*
+
 			nk_layout_row_template_push_static(ctx, 80);
 			if (nk_menu_begin_text(ctx, menu1, strlen(menu1), NK_TEXT_CENTERED, nk_vec2(200,200)))
 			{
@@ -1174,7 +1175,7 @@ int main(int argc, char *argv[])
 				}
 				nk_menu_end(ctx);
 			}
-*/
+
 			nk_layout_row_template_push_static(ctx, 80);
 			if (nk_menu_begin_text(ctx, menu2, strlen(menu2), NK_TEXT_CENTERED, nk_vec2(200,200)))
 			{
@@ -1324,7 +1325,7 @@ int main(int argc, char *argv[])
 			nk_end(ctx);
 		}
 
-		nk_glfw3_render(NK_ANTI_ALIASING_ON);
+		nk_glfw3_render(NK_ANTI_ALIASING_ON, 4096, 4096);
 		
 		glFlush();
 

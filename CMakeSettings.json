@@ -29,11 +29,6 @@
           "type": "STRING"
         },
         {
-          "name": "CMAKE_MAKE_PROGRAM",
-          "value": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
-          "type": "FILEPATH"
-        },
-        {
           "name": "TINYCTHREAD_DISABLE_TESTS",
           "value": "TRUE",
           "type": "BOOL"
