@@ -7,7 +7,10 @@ project(EFTR C)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_LIST_DIR}/modules")
 
-set(CMAKE_C_FLAGS "-Ofast -std=c2x")
+set(BUILD_DIR ${CMAKE_BINARY_DIR})
+set(CMAKE_CURRENT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/bin")
+
+set(CMAKE_C_FLAGS "-Ofast -std=gnu2x -fms-extensions -m64")
 
 add_subdirectory(deps/TinyCThread)
 
@@ -28,10 +31,12 @@ add_executable(EFTR
 	"${CMAKE_CURRENT_LIST_DIR}/src/network.h"
 	"${CMAKE_CURRENT_LIST_DIR}/src/network.c"
 	"${CMAKE_CURRENT_LIST_DIR}/src/math.h"
+	"${CMAKE_CURRENT_LIST_DIR}/src/common.h"
 	)
 
 target_link_options(EFTR  PRIVATE "-L${CMAKE_CURRENT_LIST_DIR}/deps/npcap/Lib/x64"
-	"-L${CMAKE_CURRENT_LIST_DIR}/deps/glfw-3.3.2.bin.WIN64/lib-mingw-w64")
+	"-L${CMAKE_CURRENT_LIST_DIR}/deps/glfw-3.3.2.bin.WIN64/lib-vc2019")
+
 
 #include_directories("${CMAKE_CURRENT_LIST_DIR}/deps/glfw-3.3.2.bin.WIN32/include")
 

@@ -2,6 +2,7 @@
 #define COMMON_H
 
 // Windows shit
+//#include <Windows.h>
 #include <WindowsX.h>
 #include <WinSock2.h>
 
@@ -9,7 +10,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
-#include <string.h>
+//#include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 //#include <unistd.h>

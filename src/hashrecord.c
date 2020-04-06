@@ -1,6 +1,3 @@
-#include <memory.h>
-#include <stdlib.h>
-
 #include "hashrecord.h"
 
 const uint64_t FNV_offset_basis = 0xCBF29CE484222325ULL;
