@@ -53,7 +53,7 @@ uint64_t HashRecordQueryIndex(const HashRecord *rec, const HashKey *key)
 		bool used = rec->isUsed[ index ];
 		bool equal = !memcmp(&rec->keyMem[keyOffset], key->data, rec->keyLen);
 
-		if (!used || used && equal)
+		if (!used || (used && equal))
 			break;
 		else
 		{

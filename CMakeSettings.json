@@ -30,8 +30,7 @@
           "TOOLSET_VERSION": "9.0.0",
           "PATH": "${env.PATH};${env.BIN_ROOT};${env.LLVM_ROOT}\\lib;${env.LLVM_ROOT}\\lib\\clang\\${env.TOOLSET_VERSION}\\lib\\windows",
           "KIT_ROOT": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0",
-          "INCLUDE": "${env.KIT_ROOT}\\ucrt;${env.KIT_ROOT}\\shared;${env.KIT_ROOT}\\um;C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\include;${env.LLVM_ROOT}\\lib\\clang\\${env.TOOLSET_VERSION}\\include",
-          "environment": "clang_x64"
+          "INCLUDE": "${env.KIT_ROOT}\\ucrt;${env.KIT_ROOT}\\shared;${env.KIT_ROOT}\\um;C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\include;${env.LLVM_ROOT}\\lib\\clang\\${env.TOOLSET_VERSION}\\include"
         }
       ],
       "variables": [
@@ -59,13 +58,43 @@
           "name": "TINYCTHREAD_DISABLE_TESTS",
           "value": "TRUE",
           "type": "BOOL"
-        },
-        {
-          "name": "CMAKE_FIND_ROOT_PATH_MODE_PROGRAM",
-          "value": "TRUE",
-          "type": "BOOL"
         }
       ]
+    },
+    {
+      "name": "Mingw64-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "-v",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "mingw_64" ],
+      "environments": [
+        {
+          "MINGW64_ROOT": "C:\\msys64\\mingw64",
+          "BIN_ROOT": "${env.MINGW64_ROOT}\\bin",
+          "FLAVOR": "x86_64-w64-mingw32",
+          "TOOLSET_VERSION": "7.3.0",
+          "PATH": "${env.MINGW64_ROOT}\\bin;${env.MINGW64_ROOT}\\..\\usr\\local\\bin;${env.MINGW64_ROOT}\\..\\usr\\bin;${env.MINGW64_ROOT}\\..\\bin;${env.PATH}",
+          "INCLUDE": "${env.INCLUDE};${env.MINGW64_ROOT}\\include\\c++\\${env.TOOLSET_VERSION};${env.MINGW64_ROOT}\\include\\c++\\${env.TOOLSET_VERSION}\\tr1;${env.MINGW64_ROOT}\\include\\c++\\${env.TOOLSET_VERSION}\\${env.FLAVOR}",
+          "environment": "mingw_64"
+        }
+      ],
+      "variables": [
+        {
+          "name": "CMAKE_C_COMPILER",
+          "value": "${env.BIN_ROOT}\\gcc.exe",
+          "type": "STRING"
+        },
+        {
+          "name": "CMAKE_CXX_COMPILER",
+          "value": "${env.BIN_ROOT}\\g++.exe",
+          "type": "STRING"
+        }
+      ],
+      "intelliSenseMode": "linux-gcc-x64"
     }
   ]
 }

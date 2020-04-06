@@ -31,7 +31,7 @@ add_executable(EFTR
 	)
 
 target_link_options(EFTR  PRIVATE "-L${CMAKE_CURRENT_LIST_DIR}/deps/npcap/Lib/x64"
-	"-L${CMAKE_CURRENT_LIST_DIR}/deps/glfw-3.3.2.bin.WIN64/lib-vc2019")
+	"-L${CMAKE_CURRENT_LIST_DIR}/deps/glfw-3.3.2.bin.WIN64/lib-mingw-w64")
 
 #include_directories("${CMAKE_CURRENT_LIST_DIR}/deps/glfw-3.3.2.bin.WIN32/include")
 
