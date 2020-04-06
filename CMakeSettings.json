@@ -22,6 +22,7 @@
       "buildCommandArgs": "-v",
       "ctestCommandArgs": "",
       "inheritEnvironments": [ "clang_x64" ],
+      "intelliSenseMode": "windows-clang-x64",
       "environments": [
         {
           "LLVM_ROOT": "C:\\Program Files\\LLVM",
@@ -29,7 +30,7 @@
           "TOOLSET_VERSION": "9.0.0",
           "PATH": "${env.PATH};${env.BIN_ROOT};${env.LLVM_ROOT}\\lib;${env.LLVM_ROOT}\\lib\\clang\\${env.TOOLSET_VERSION}\\lib\\windows",
           "KIT_ROOT": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0",
-          "INCLUDE": "${env.INCLUDE};${env.KIT_ROOT}\\ucrt;${env.KIT_ROOT}\\shared;${env.KIT_ROOT}\\um;C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\include;${env.LLVM_ROOT}\\lib\\clang\\${env.TOOLSET_VERSION}\\include",
+          "INCLUDE": "${env.KIT_ROOT}\\ucrt;${env.KIT_ROOT}\\shared;${env.KIT_ROOT}\\um;C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.25.28610\\include;${env.LLVM_ROOT}\\lib\\clang\\${env.TOOLSET_VERSION}\\include",
           "environment": "clang_x64"
         }
       ],
@@ -43,6 +44,26 @@
           "name": "CMAKE_CXX_COMPILER",
           "value": "${env.BIN_ROOT}\\clang++.exe",
           "type": "STRING"
+        },
+        {
+          "name": "CMAKE_AR",
+          "value": "${env.BIN_ROOT}\\llvm-ar.exe",
+          "type": "STRING"
+        },
+        {
+          "name": "CMAKE_MAKE_PROGRAM",
+          "value": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
+          "type": "FILEPATH"
+        },
+        {
+          "name": "TINYCTHREAD_DISABLE_TESTS",
+          "value": "TRUE",
+          "type": "BOOL"
+        },
+        {
+          "name": "CMAKE_FIND_ROOT_PATH_MODE_PROGRAM",
+          "value": "TRUE",
+          "type": "BOOL"
         }
       ]
     }
