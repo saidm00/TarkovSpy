@@ -2,8 +2,7 @@
 #define MATH_H
 
 //#include <glm/glm.h>
-#include <stdint.h>
-#include <math.h>
+#include "common.h"
 
 typedef struct Vector2
 {

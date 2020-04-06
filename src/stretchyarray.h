@@ -1,8 +1,7 @@
 #ifndef STRETCHYARRAY_H
 #define STRETCHYARRAY_H
 
-#include <string.h>
-#include <stdlib.h>
+#include "common.h"
 
 typedef struct StretchyArray
 {
@@ -81,7 +80,7 @@ inline void *StretchyArrayResize(StretchyArray *self, size_t newSize)
 	self->size = newSize;
 }
 
-inline void *StretchyBufferPopAt(StretchyArray *self, size_t index)
+inline void StretchyBufferPopAt(StretchyArray *self, size_t index)
 {
 	if (self->size - 1 == 0)
 	{

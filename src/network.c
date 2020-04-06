@@ -89,7 +89,7 @@ void ProcessActions(ByteStream *stream, uint8_t channelID, bool outbound)
         }
         else
         {
-            printf("Processing action with code: 0x%04hX (%s)\n", ac, codeString);  
+            printf("Processing action with code: 0x%04hX (%s)\n", (uint16_t)ac, codeString);  
         }
 
         if (outbound)

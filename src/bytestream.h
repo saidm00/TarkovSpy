@@ -2,11 +2,9 @@
 #define BYTESTREAM_H
 
 #include "math.h"
-#include <string.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <winsock2.h>
+
+#include <Windowsx.h>
+#include <WinSock2.h>
 
 typedef struct FloatQuantizer
 {

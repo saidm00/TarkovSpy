@@ -1,7 +1,7 @@
 #ifndef NETWORK_H
 #define NETWORK_H
 
-#include <string.h>
+#include "common.h"
 #include "bytestream.h"
 #include "world.h"
 

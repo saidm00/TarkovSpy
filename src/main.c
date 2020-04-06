@@ -1,3 +1,5 @@
+#include "common.h"
+
 #define NK_INCLUDE_STANDARD_IO
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_DEFAULT_ALLOCATOR
@@ -14,24 +16,10 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-
 #define NK_GLFW_GL2_IMPLEMENTATION
 #include "nuklear_glfw_gl2.h"
 
-#include <stdlib.h>
-#include <stdio.h>
-
-#include <Winsock2.h>
-#include <Windows.h>
-#include <pthread.h>
 #include <pcap.h> //peniscap
-
-#include <stdint.h>
-#include <stdbool.h>
-#include <time.h>
-
-#include <unistd.h>
-#include <stdatomic.h>
 
 #include "ini.h"
 #include "unet.h"
@@ -289,14 +277,14 @@ typedef struct Analyzer
 {
 	pcap_t *handle;
 
-	pthread_t sniffer_thread;
-	pthread_t decoder_thread;
+	thrd_t sniffer_thread;
+	thrd_t decoder_thread;
 
-	_Atomic _Bool is_working;
+	_Atomic bool is_working;
 	_Atomic unsigned int ms_batch_delay;
 	//_Atomic _Bool any_thread_errored; // Defaults to false
 
-	pthread_mutex_t mutex;
+	mtx_t mutex;
 } Analyzer_t;
 
 
@@ -316,12 +304,12 @@ static void stop_analyzer(Analyzer_t *analyzer)
 
 	if (analyzer->is_working)
 	{
-		pthread_mutex_lock(&analyzer->mutex);
-		pthread_kill(analyzer->sniffer_thread, 0);
-		pthread_kill(analyzer->decoder_thread, 0);
-		pthread_mutex_unlock(&analyzer->mutex);
+		//mtx_lock(&analyzer->mutex);
+		//pthread_kill(analyzer->sniffer_thread, 0);
+		//pthread_kill(analyzer->decoder_thread, 0);
+		//mtx_unlock(&analyzer->mutex);
 
-		pthread_mutex_destroy(&analyzer->mutex);
+		//mtx_destroy(&analyzer->mutex);
 		analyzer->is_working = false;
 	}
 	//analyzer->is_sniffing = false;
@@ -374,7 +362,7 @@ typedef enum
 	CONNECTION_STATUS_COULD_NOT_FIND_DEVICE
 } connect_status_t;
 
-static void *run_packet_sniffer(void *user)
+static int run_packet_sniffer(void *user)
 {
 	global_data_t *gd = (global_data_t *)user;
 	
@@ -432,13 +420,13 @@ static void *run_packet_sniffer(void *user)
 
 		initialize_packet(&pkt, ts, data, size, ip1, ip2, outbound);
 
-		pthread_mutex_lock(&gd->analyzer.mutex);
+		mtx_lock(&gd->analyzer.mutex);
 		push_work_packet(&gd->work, &pkt);
-		pthread_mutex_unlock(&gd->analyzer.mutex);
+		mtx_unlock(&gd->analyzer.mutex);
 	}
 
 	gd->analyzer.is_working = false;
-	pthread_exit(NULL);
+	thrd_exit(0);
 }
 
 
@@ -700,7 +688,7 @@ JmpPopPacket:
 }
 
 /* Thread running to analyze and decode packets, for possible UNET packets coming from Tarkov servers */
-static void *run_packet_decoder(void *user)
+static int run_packet_decoder(void *user)
 {
 	global_data_t *gd = (global_data_t *)user;
 	packet_t pkt;
@@ -709,12 +697,12 @@ static void *run_packet_decoder(void *user)
 
 	while (gd->analyzer.is_working)
 	{
-		pthread_mutex_lock(&gd->analyzer.mutex);
+		mtx_lock(&gd->analyzer.mutex);
 		if (gd->work.size > 0)
 		{
 			move_packet_work(&local_work, &gd->work);
 		}
-		pthread_mutex_unlock(&gd->analyzer.mutex);
+		mtx_unlock(&gd->analyzer.mutex);
 		
 		if (local_work.size > 0)
 		{
@@ -723,15 +711,21 @@ static void *run_packet_decoder(void *user)
 		}
 		else
 		{
-			usleep(gd->analyzer.ms_batch_delay * 1000); // Delay for accumulating packets
+			unsigned long milisec = gd->analyzer.ms_batch_delay;
+			struct timespec delay;
+			time_t sec = (time_t)(milisec / 1000);
+			delay.tv_sec = sec;
+			delay.tv_nsec = 0;
+
+			thrd_sleep(&delay, NULL); // Delay for accumulating packets
 		}
 	}
 
 	gd->analyzer.is_working = false;
-	pthread_exit(NULL);
+	thrd_exit(0);
 }
 
-static connect_status_t analyze(global_data_t *gd)
+static connect_status_t start_analyzer(global_data_t *gd)
 {
 	connect_status_t status;
 	int err;
@@ -857,34 +851,34 @@ im_so_happy:
 		goto smells_nasty;
 	}
 
-	pthread_attr_t attrib;
+	/*pthread_attr_t attrib;
 	pthread_attr_init(&attrib);
 
-	int thread_err;
+	int thread_err;*/
 	
 	// Create mutex
-	pthread_mutexattr_t mutex_attr;
-	pthread_mutexattr_init(&mutex_attr);
+	//pthread_mutexattr_t mutex_attr;
+	//pthread_mutexattr_init(&mutex_attr);
 	//pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_NORMAL);
-	pthread_mutex_init(&gd->analyzer.mutex, &mutex_attr);
+	//pthread_mutex_init(&gd->analyzer.mutex, &mutex_attr);
 
-	pthread_mutexattr_destroy(&mutex_attr);
+	//pthread_mutexattr_destroy(&mutex_attr);
 
 	// Attempt to start sniffer thread
-	thread_err = pthread_create(&gd->analyzer.sniffer_thread, &attrib,
-		&run_packet_sniffer, (void *)gd);
+	err = thrd_create(&gd->analyzer.sniffer_thread, &run_packet_sniffer, (void*)gd);
 
-	if (thread_err != 0)
+	if (err != thrd_success)
 	{
 		printf("%s\n", "Failed to create sniffer thread!");
 		goto smells_nasty;
 	}
 
 	// Attempt to start decoder thread
-	thread_err = pthread_create(&gd->analyzer.decoder_thread, &attrib,
-		&run_packet_decoder, (void *)gd);
+	//thread_err = pthread_create(&gd->analyzer.decoder_thread, &attrib,
+	//	&run_packet_decoder, (void *)gd);
+	err = thrd_create(&gd->analyzer.decoder_thread, &run_packet_decoder, (void*)gd);
 
-	if (thread_err != 0)
+	if (err != thrd_success)
 	{
 		printf("%s\n", "Failed to create decoder thread!");
 		goto smells_nasty;
@@ -896,7 +890,7 @@ im_so_happy:
 	printf("%s\n", "Successfully created analyzer threads!");
 
 
-	pthread_attr_destroy(&attrib);
+	//pthread_attr_destroy(&attrib);
 
 smells_nasty:
 	pcap_freealldevs(alldevs);
@@ -1013,12 +1007,12 @@ int main(int argc, char *argv[])
 	// struct nk_context ctx;
 	// nk_init_fixed(&ctx, calloc(1, MAX_MEMORY), MAX_MEMORY, &font);
 
-	analyze(&gd);
+	start_analyzer(&gd);
 
 	bool b = false;
 	while(!b)
 	{
-		sleep(20);
+		//thrd_sleep(20);
 	}
 
 
@@ -1307,7 +1301,7 @@ int main(int argc, char *argv[])
 						&gd.config.target_ip.byte3,
 						&gd.config.target_ip.byte4);
 
-					connect_status = analyze(&gd);
+					connect_status = start_analyzer(&gd);
 				}
 
 				if (nk_button_label(ctx, "Stop Analyzer") && gd.analyzer.is_working)

@@ -1,14 +1,7 @@
 #ifndef UNET_H
 #define UNET_H
 
-#include <math.h>
-
-#include <string.h>
-#include <stdlib.h>
-
-#include <stdbool.h>
-#include <stdint.h>
-#include <winsock2.h>
+#include "common.h"
 
 #include "bytestream.h"
 
@@ -89,7 +82,7 @@ inline void InitializeAcksCache(AcksCache *cache, const char *label)
 inline bool AcksReadMessage(AcksCache *cache, uint16_t messageID)
 {
     size_t maxDistance = cache->length;
-    size_t rawDistance = abs(messageID - cache->head);
+    size_t rawDistance = (size_t) llabs((int64_t)messageID - (int64_t)cache->head);
     size_t distance = (rawDistance < (maxDistance / 2)) ? rawDistance : maxDistance - rawDistance;
     
     /* Out of window */

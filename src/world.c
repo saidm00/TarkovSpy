@@ -35,12 +35,14 @@ void InitializeWorld(World *world, const Vector3 *min, const Vector3 *max)
 
 	InitializeStretchyArray(&world->loot, sizeof(LootEntry));
 	InitializeStretchyArray(&world->corpses, sizeof(Vector3));
+
+	mtx_init(&world->mutex, mtx_plain | mtx_recursive);
 }
 
 
 void WorldCreateObserver(World *world, uint8_t CID, const Observer *obs)
 {
-	pthread_mutex_lock(&world->mutex);
+	mtx_lock(&world->mutex);
 
 	HashKey key = (HashKey) { 1, (void *)&CID };
 	uint64_t index = HashRecordQueryIndex(&world->observers, &key);
@@ -55,7 +57,7 @@ void WorldCreateObserver(World *world, uint8_t CID, const Observer *obs)
 		// Observer already at CID slot
 	}
 
-	pthread_mutex_unlock(&world->mutex);
+	mtx_unlock(&world->mutex);
 }
 
 void WorldDestroyObserver(World *world, uint8_t CID)

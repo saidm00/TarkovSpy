@@ -6,9 +6,6 @@
 #include "hashrecord.h"
 #include "stretchyarray.h"
 
-#include <pthread.h>
-#include <stdint.h>
-
 typedef enum LootItemRarity
 {
     LOOT_ITEM_RARITY_COMMON = 0x1,
@@ -84,7 +81,7 @@ typedef struct World
 	HashRecord temporaryLoot; // std::unordered_map<uint32_t, TemporaryLoot>
 	StretchyArray loot; // std::vector<LootEntry>
 	StretchyArray corpses; // std::vector<Vector3>
-	pthread_mutex_t mutex;
+	mtx_t mutex;
 } World;
 
 static const size_t MAX_OBSERVERS = (256); // Max possible value of uint8_t
