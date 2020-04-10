@@ -20,7 +20,7 @@ typedef enum ActionCode
 	ACTION_CODE_GAME_UPDATE      = 170,
 } ActionCode;
 
-inline const char *ActionCodeToString(ActionCode ac)
+static inline const char *ActionCodeToString(ActionCode ac)
 {
 	switch (ac)
 	{
@@ -39,11 +39,11 @@ inline const char *ActionCodeToString(ActionCode ac)
 	}
 }
 
-inline bool IsActionStringUnknown(const char *codeString)
+static inline bool IsActionStringUnknown(const char *codeString)
 {
 	return strcmp(codeString, "UNKNOWN") == 0;
 }
 
-void ProcessActions(ByteStream *stream, uint8_t channelID, bool outbound);
+void ProcessActions(World *world, ByteStream *stream, uint8_t channelID, bool outbound);
 
 #endif // NETWORK_H

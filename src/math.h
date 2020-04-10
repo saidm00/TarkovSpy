@@ -25,7 +25,7 @@ typedef struct Quaternion
     float w;
 } Quaternion;
 
-inline uint32_t Popcount(uint32_t x)
+static inline uint32_t Popcount(uint32_t x)
 {
     uint32_t num = x - (x >> 1 & 1431655765U);
     uint32_t num2 = (num >> 2 & 858993459U) + (num & 858993459U);
@@ -34,7 +34,7 @@ inline uint32_t Popcount(uint32_t x)
     return num4 + (num4 >> 16) & 63U;
 }
 
-inline uint32_t Log2(uint32_t value)
+static inline uint32_t Log2(uint32_t value)
 {
     uint32_t num = value | value >> 1;
     uint32_t num2 = num | num >> 2;
@@ -43,7 +43,7 @@ inline uint32_t Log2(uint32_t value)
     return Popcount((num4 | num4 >> 16) >> 1);
 }
 
-inline uint32_t BitsRequired(uint32_t min, uint32_t max)
+static inline uint32_t BitsRequired(uint32_t min, uint32_t max)
 {
     if (min != max)
     {

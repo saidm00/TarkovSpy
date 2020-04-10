@@ -44,8 +44,8 @@ NetError;
 typedef struct AcksCache
 {
     bool *acks;
-    int64_t length;
-    int64_t head, tail, windowLength;
+    size_t length;
+    size_t head, tail, windowLength;
     const char *label;
 }
 AcksCache;
@@ -68,7 +68,7 @@ inline size_t UNETAcksSize(UNETAcksCache *cache)
 */
 
 /* Inits Acks packet info */
-inline void InitializeAcksCache(AcksCache *cache, const char *label)
+static inline void InitializeAcksCache(AcksCache *cache, const char *label)
 {
     cache->length = 65536;
     cache->acks = calloc(cache->length, sizeof(bool));
@@ -79,17 +79,15 @@ inline void InitializeAcksCache(AcksCache *cache, const char *label)
 }
 
 /* Read acks error message */
-inline bool AcksReadMessage(AcksCache *cache, uint16_t messageID)
+static inline bool AcksReadMessage(AcksCache *cache, uint16_t messageID)
 {
     int64_t maxDistance = cache->length;
-    int64_t rawDistance = llabs((long long)messageID - (long long)cache->head);
+    int64_t rawDistance = llabs((int64_t)messageID - (int64_t)cache->head);
     int64_t distance = (rawDistance < (maxDistance / 2)) ? rawDistance : maxDistance - rawDistance;
     
     /* Out of window */
     if (distance > cache->windowLength)
-    {
         return false;
-    }
     
     if (messageID < cache->tail || messageID > cache->head)
     {
@@ -105,9 +103,7 @@ inline bool AcksReadMessage(AcksCache *cache, uint16_t messageID)
 
     bool acked = cache->acks[messageID];
     if (!acked)
-    {
         cache->acks[messageID] = true;
-    }
     
     return !acked;
 }
@@ -134,13 +130,13 @@ typedef struct MessageExtractor
 }
 MessageExtractor;
 
-bool DidMessageExtractorError(MessageExtractor *messageExtractor)
+static inline bool DidMessageExtractorError(MessageExtractor *messageExtractor)
 {
     return messageExtractor->error != NET_ERROR_OK;
 }
 
 // Creates and initializes a MessageExtractor which holds state for parsing messages
-inline MessageExtractor CreateMessageExtractor(ByteStream *stream, uint16_t maxChannelID, AcksCache *acks)
+static inline MessageExtractor CreateMessageExtractor(ByteStream *stream, uint16_t maxChannelID, AcksCache *acks)
 {
     MessageExtractor messageExtractor;
 
@@ -158,7 +154,7 @@ inline MessageExtractor CreateMessageExtractor(ByteStream *stream, uint16_t maxC
 }
 
 // Checks if message channelID is valid
-inline bool MessageExtractorIsChannelValid(MessageExtractor *messageExtractor)
+static inline bool MessageExtractorIsChannelValid(MessageExtractor *messageExtractor)
 {
     if(messageExtractor->channelID > messageExtractor->maxChannelID)
     {
@@ -170,42 +166,43 @@ inline bool MessageExtractorIsChannelValid(MessageExtractor *messageExtractor)
 }
 
 /* Checks if message length is valid */
-inline bool MessageExtractorIsLengthValid(MessageExtractor *messageExtractor)
+static inline bool MessageExtractorIsLengthValid(MessageExtractor *messageExtractor)
 {
     if(messageExtractor->totalLength < messageExtractor->messageLength)
     {
         messageExtractor->error = NET_ERROR_BAD_MESSAGE;
         return false;
     }
+
     return true;
 }
 
 
-inline bool MessageExtractorGetChannelID(MessageExtractor *messageExtractor)
+static inline uint8_t MessageExtractorGetChannelID(MessageExtractor *messageExtractor)
 {
     return messageExtractor->channelID;
 }
 
-inline uint16_t MessageExtractorGetMessageLength(MessageExtractor *messageExtractor)
+static inline uint16_t MessageExtractorGetMessageLength(MessageExtractor *messageExtractor)
 {
     return messageExtractor->messageLength;
 }
 
-inline uint8_t *MessageExtractorGetMessageStart(MessageExtractor *messageExtractor)
+static inline uint8_t *MessageExtractorGetMessageStart(MessageExtractor *messageExtractor)
 {
     return messageExtractor->data;
 }
 
 
 /* Prototypes for commonly used functions (At least one of these are called in three of the four function definitions below) */
-inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor);
-inline bool MessageExtractorExtractMessageHeader(MessageExtractor *messageExtractor);
-inline bool MessageExtractorExtractMessageLength(MessageExtractor *messageExtractor);
-//inline bool MessageExtractorGetMessageStart(MessageExtractor *messageExtractor);
-inline bool MessageExtractorExtractMessage(MessageExtractor *messageExtractor);
+static inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor);
+static inline bool MessageExtractorExtractMessageHeader(MessageExtractor *messageExtractor);
+static inline bool MessageExtractorExtractMessageLength(MessageExtractor *messageExtractor);
+//static inline  MessageExtractorGetMessageStart(MessageExtractor *messageExtractor);
+static inline bool MessageExtractorExtractMessage(MessageExtractor *messageExtractor);
 
 /* Gets next message from message packet */
-inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor)
+static inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor)
 {
     //printf("len: %hu, %hu\n", messageExtractor->messageLength, messageExtractor->totalLength);
     messageExtractor->isMessageCombined = false;
@@ -223,28 +220,30 @@ inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor)
     }
 
     messageExtractor->channelID = *messageExtractor->data;
+
     if (messageExtractor->channelID == (uint8_t)MESSAGE_DELIMITER_RELIABLE)
     {
-        printf("Cum 0\n");
+        //printf("Cum 0\n");
         MessageExtractorExtractMessageHeader(messageExtractor);
 
-        NetMessageReliableHeader* hr = (NetMessageReliableHeader*)messageExtractor->data;
+        NetMessageReliableHeader* hr = (NetMessageReliableHeader *)messageExtractor->data;
         hr->messageID = ntohs(hr->messageID);
 
         if (!AcksReadMessage(messageExtractor->acks, hr->messageID))
         {
-            printf("Cum 1\n");
+            //printf("Cum 1\n");
             return MessageExtractorGetNextMessage(messageExtractor);
         }
+        
         messageExtractor->data += sizeof(NetMessageReliableHeader);
         messageExtractor->totalLength -= sizeof(NetMessageReliableHeader);
         messageExtractor->messageLength = 0;
-        printf("Cum 2\n");
+        //printf("Cum 2\n");
         return MessageExtractorGetNextMessage(messageExtractor);
     }
     else if (messageExtractor->channelID == (uint8_t)MESSAGE_DELIMITER_COMBINED)
     {
-        printf("Cum 3\n");
+        //printf("Cum 3\n");
         
         ++messageExtractor->data;
         --messageExtractor->totalLength;
@@ -253,17 +252,17 @@ inline bool MessageExtractorGetNextMessage(MessageExtractor *messageExtractor)
         return MessageExtractorExtractMessage(messageExtractor);
     }
 
-    printf("Cum 4\n");
+    //printf("Cum 4\n");
 
     if (!MessageExtractorIsChannelValid(messageExtractor))
         return false;
 
-    printf("Cum 5\n");
+    //printf("Cum 5\n");
     return MessageExtractorExtractMessage(messageExtractor); 
 }
 
 /* Extracts header of message packet */
-inline bool MessageExtractorExtractMessageHeader(MessageExtractor *messageExtractor)
+static inline bool MessageExtractorExtractMessageHeader(MessageExtractor *messageExtractor)
 {
     messageExtractor->channelID = *messageExtractor->data;
     
@@ -275,7 +274,7 @@ inline bool MessageExtractorExtractMessageHeader(MessageExtractor *messageExtrac
 }
 
 /* Fetches message length from message packet */
-inline bool MessageExtractorExtractMessageLength(MessageExtractor *messageExtractor)
+static inline bool MessageExtractorExtractMessageLength(MessageExtractor *messageExtractor)
 {
     uint8_t highByte = *messageExtractor->data;
     if (highByte & 0x80)
@@ -304,7 +303,7 @@ inline bool MessageExtractorExtractMessageLength(MessageExtractor *messageExtrac
 }
 
 /* Extract message from message packet */
-inline bool MessageExtractorExtractMessage(MessageExtractor *messageExtractor)
+static inline bool MessageExtractorExtractMessage(MessageExtractor *messageExtractor)
 {
     if (messageExtractor->totalLength < 2)
     {

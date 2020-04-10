@@ -22,11 +22,8 @@ void ZeroObserver(Observer *obs)
 	ZeroInventory(&obs->inventory);
 }
 
-void InitializeWorld(World *world, const Vector3 *min, const Vector3 *max)
-{
-	world->min = *min;
-	world->max = *max;
-	
+void InitializeWorld(World *world)
+{	
 	InitializeHashRecord(&world->observers, MAX_OBSERVERS,
 		sizeof(uint8_t) /* CID */, sizeof(Observer));
 
@@ -36,9 +33,17 @@ void InitializeWorld(World *world, const Vector3 *min, const Vector3 *max)
 	InitializeStretchyArray(&world->loot, sizeof(LootEntry));
 	InitializeStretchyArray(&world->corpses, sizeof(Vector3));
 
-	mtx_init(&world->mutex, mtx_plain | mtx_recursive);
+	mtx_init(&world->mutex, mtx_plain);
+
+	world->isLoaded = false;
 }
 
+void LoadWorld(World *world, const Vector3 *min, const Vector3 *max)
+{
+	world->isLoaded = true;
+	world->min = *min;
+	world->max = *max;
+}
 
 void WorldCreateObserver(World *world, uint8_t CID, const Observer *obs)
 {

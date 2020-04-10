@@ -20,7 +20,7 @@ uint64_t hash64_fnv_1a(uint8_t *data, size_t len)
 
 uint64_t hash64(uint8_t *data, size_t len)
 {
-	hash64_fnv_1a(data, len);
+	return hash64_fnv_1a(data, len);
 }
 
 void InitializeHashRecord(HashRecord *rec, size_t size, size_t keyLen, size_t itemLen)

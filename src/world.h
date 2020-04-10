@@ -65,6 +65,9 @@ typedef struct Observer
 	Vector3 lastPos, currPos; // p0 is last pos, while p1 is current
 	Quaternion rot;
 
+	bool inProne;
+	bool poseLevel;
+
 	ObserverType type;
 	ObserverFlags flags : 3;
 	Inventory inventory;
@@ -76,6 +79,7 @@ typedef struct TemporaryLoot { uint32_t ID; Vector3 pos; } TemporaryLoot;
 
 typedef struct World
 {
+	bool isLoaded;
 	Vector3 min, max;
 	HashRecord observers; // std::unordered_map<uint8_t, Observer>
 	HashRecord temporaryLoot; // std::unordered_map<uint32_t, TemporaryLoot>
@@ -87,7 +91,8 @@ typedef struct World
 static const size_t MAX_OBSERVERS = (256); // Max possible value of uint8_t
 static const size_t MAX_TEMPORARY_LOOT = (4096);
 
-void InitializeWorld(World *world, const Vector3 *min, const Vector3 *max);
+void InitializeWorld(World *world);
+void LoadWorld(World *world, const Vector3 *min, const Vector3 *max);
 
 void WorldCreateObserver(World *world, uint8_t CID, const Observer *obs);
 

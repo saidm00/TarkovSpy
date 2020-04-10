@@ -12,7 +12,7 @@ typedef struct StretchyArray
 } StretchyArray;
 
 
-inline void InitializeStretchyArray(StretchyArray *self, size_t itemLen)
+static inline void InitializeStretchyArray(StretchyArray *self, size_t itemLen)
 {
 	self->data = NULL;
 	self->itemLen = itemLen;
@@ -20,7 +20,13 @@ inline void InitializeStretchyArray(StretchyArray *self, size_t itemLen)
 	self->size = 0;
 }
 
-inline void DestroyStretchyArray(StretchyArray *self)
+static inline void *StretchyArrayAccess(StretchyArray *self, size_t index)
+{
+	return (void *) &self->data[ index * self->itemLen ];
+}
+
+
+static inline void DestroyStretchyArray(StretchyArray *self)
 {
 	free(self->data);
 	self->itemLen = 0;
@@ -29,7 +35,7 @@ inline void DestroyStretchyArray(StretchyArray *self)
 	self->data = NULL;
 }
 
-inline void StretchyArrayPush(StretchyArray *self, const void *item)
+static inline void StretchyArrayPush(StretchyArray *self, const void *item)
 {
 	size_t initialSize = self->size;
 
@@ -49,7 +55,7 @@ inline void StretchyArrayPush(StretchyArray *self, const void *item)
 }
 
 
-inline void StretchyArrayPop(StretchyArray *self)
+static inline void StretchyArrayPop(StretchyArray *self)
 {
 	size_t initialSize = self->size;
 
@@ -66,7 +72,7 @@ inline void StretchyArrayPop(StretchyArray *self)
 	}
 }
 
-inline void *StretchyArrayResize(StretchyArray *self, size_t newSize)
+static inline void StretchyArrayResize(StretchyArray *self, size_t newSize)
 {
 	if (self->size > 0)
 	{
@@ -80,7 +86,7 @@ inline void *StretchyArrayResize(StretchyArray *self, size_t newSize)
 	self->size = newSize;
 }
 
-inline void StretchyBufferPopAt(StretchyArray *self, size_t index)
+static inline void StretchyArrayPopAt(StretchyArray *self, size_t index)
 {
 	if (self->size - 1 == 0)
 	{
